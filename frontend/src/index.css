@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 215 52% 24%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 52% 24%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 52% 24%;
+
+    --primary: 215 52% 24%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 42 92% 53%;
+    --secondary-foreground: 215 52% 15%;
+
+    --muted: 215 20% 96%;
+    --muted-foreground: 215 20% 45%;
+
+    --accent: 42 92% 53%;
+    --accent-foreground: 215 52% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 42 92% 53%;
+    --warning-foreground: 215 52% 15%;
+
+    --border: 215 20% 90%;
+    --input: 215 20% 90%;
+    --ring: 215 52% 24%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 215 55% 18%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 42 92% 53%;
+    --sidebar-primary-foreground: 215 55% 12%;
+    --sidebar-accent: 215 55% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 215 55% 25%;
+    --sidebar-ring: 42 92% 53%;
+
+    --chart-1: 215 52% 24%;
+    --chart-2: 42 92% 53%;
+    --chart-3: 142 76% 36%;
+    --chart-4: 215 70% 50%;
+    --chart-5: 42 80% 45%;
+  }
+
+  .dark {
+    --background: 215 30% 10%;
+    --foreground: 0 0% 95%;
+
+    --card: 215 30% 13%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 215 30% 13%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 215 52% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 42 92% 53%;
+    --secondary-foreground: 215 52% 15%;
+
+    --muted: 215 20% 20%;
+    --muted-foreground: 215 15% 60%;
+
+    --accent: 42 92% 53%;
+    --accent-foreground: 215 52% 15%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 42 92% 53%;
+    --warning-foreground: 215 52% 15%;
+
+    --border: 215 20% 20%;
+    --input: 215 20% 20%;
+    --ring: 215 52% 35%;
+
+    --sidebar-background: 215 52% 18%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 42 92% 53%;
+    --sidebar-primary-foreground: 215 52% 15%;
+    --sidebar-accent: 215 52% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 215 52% 25%;
+    --sidebar-ring: 42 92% 53%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-card/80 backdrop-blur-lg border border-border/50;
+  }
+
+  .gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(215, 52%, 18%) 100%);
+  }
+
+  .gradient-success {
+    background: linear-gradient(135deg, hsl(var(--success)) 0%, hsl(142, 76%, 28%) 100%);
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 40px -10px hsl(var(--primary) / 0.3);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .animate-pulse-soft {
+    animation: pulseSoft 2s ease-in-out infinite;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseSoft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}

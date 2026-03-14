@@ -1,0 +1,31 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.json
+
+# Uploads / runtime
+data/
+tmp/
+logs/
+
+# Docker
+*.log
