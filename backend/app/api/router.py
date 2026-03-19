@@ -1,6 +1,8 @@
 from datetime import datetime
+
 from fastapi import APIRouter
 
+from app.api.faturas import router as faturas_router
 from app.core.config import get_settings
 from app.schemas.health import HealthResponse
 
@@ -25,24 +27,15 @@ def meta():
         "environment": settings.app_env,
         "server_time": datetime.utcnow().isoformat() + "Z",
         "modules": {
-            "faturas": "planned",
+            "faturas": "partial",
             "boletos": "planned",
             "dashboard": "planned",
             "historico": "planned",
             "integrations": {
-                "bigquery": "planned",
-                "sicoob": "planned",
+                "bigquery": "partial",
+                "sicoob": "partial",
             },
         },
-    }
-
-
-@router.get("/api/v1/faturas", tags=["faturas"])
-def list_faturas():
-    return {
-        "items": [],
-        "total": 0,
-        "message": "Endpoint base criado. Integracao com workflow_adapter vira na proxima etapa."
     }
 
 
@@ -70,3 +63,6 @@ def historico():
         "items": [],
         "message": "Endpoint base criado. Historico real vira na proxima etapa."
     }
+
+
+router.include_router(faturas_router)
