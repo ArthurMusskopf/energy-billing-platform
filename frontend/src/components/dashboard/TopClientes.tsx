@@ -6,6 +6,21 @@ interface TopClientesProps {
 }
 
 export function TopClientes({ clientes }: TopClientesProps) {
+  if (clientes.length === 0) {
+    return (
+      <Card className="animate-slide-up" style={{ animationDelay: "300ms" }}>
+        <CardHeader>
+          <CardTitle className="text-lg">Maiores Economias por Cliente</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Ainda nao ha clientes calculados para compor o ranking.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("pt-BR", {
       style: "currency",

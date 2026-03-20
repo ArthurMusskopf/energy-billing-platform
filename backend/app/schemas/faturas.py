@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -37,9 +37,87 @@ class FaturaWorkflowItemSchema(BaseModel):
     duplicada_de: Optional[str] = None
     status_parse: Optional[str] = None
     status_validacao: Optional[str] = None
+    validado_por: Optional[str] = None
+    validado_em: Optional[str] = None
     status_calculo: Optional[str] = None
+    calculado_em: Optional[str] = None
     status_emissao: Optional[str] = None
+    emitido_em: Optional[str] = None
     observacoes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class FaturaAlertaSchema(BaseModel):
+    id: str
+    campo: str
+    tipo: Literal["warning", "error"] = "warning"
+    mensagem: str
+    valor_atual: float = 0
+    valor_esperado: float = 0
+    desvio_percentual: float = 0
+
+
+class FaturaItemDetalheSchema(BaseModel):
+    id: str
+    codigo: Optional[str] = None
+    descricao: Optional[str] = None
+    unidade: Optional[str] = None
+    quantidade_registrada: Optional[float] = None
+    tarifa: Optional[float] = None
+    valor: Optional[float] = None
+    pis_valor: Optional[float] = None
+    cofins_base: Optional[float] = None
+    icms_aliquota: Optional[float] = None
+    icms_valor: Optional[float] = None
+    tarifa_sem_trib: Optional[float] = None
+
+
+class FaturaMedidorDetalheSchema(BaseModel):
+    id: str
+    medidor: Optional[str] = None
+    tipo: Optional[str] = None
+    posto: Optional[str] = None
+    leitura_anterior: Optional[str] = None
+    leitura_atual: Optional[str] = None
+    total_apurado: Optional[float] = None
+
+
+class FaturaDetalheSchema(FaturaWorkflowItemSchema):
+    leitura_anterior: Optional[str] = None
+    leitura_atual: Optional[str] = None
+    dias: Optional[int] = None
+    proxima_leitura: Optional[str] = None
+    nota_fiscal_serie: Optional[str] = None
+    nota_fiscal_emissao: Optional[str] = None
+    cidade_uf: Optional[str] = None
+    cep: Optional[str] = None
+    itens: List[FaturaItemDetalheSchema]
+    medidores: List[FaturaMedidorDetalheSchema]
+    alertas: List[FaturaAlertaSchema]
+
+
+class FaturaValidacaoRequestSchema(BaseModel):
+    usuario: Optional[str] = None
+
+
+class FaturaValidacaoResponseSchema(BaseModel):
+    id: str
+    status_validacao: str
+    validado_por: Optional[str] = None
+    validado_em: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class FaturaCalculoResponseSchema(BaseModel):
+    id: str
+    status_calculo: str
+    calculado_em: Optional[str] = None
+    table: str
+    affected_rows: int
+    missing_clientes: List[str]
+    missing_reason: Dict[str, str]
+    detail: Optional[str] = None
 
 
 class FaturasParseResponseSchema(BaseModel):
@@ -51,3 +129,10 @@ class FaturasParseResponseSchema(BaseModel):
     workflow: List[FaturaWorkflowItemSchema]
     salvar_auto_executado: bool
     bigquery_result: Optional[Dict[str, Any]] = None
+
+
+class FaturasListResponseSchema(BaseModel):
+    items: List[FaturaWorkflowItemSchema]
+    total: int
+    limit: int
+    offset: int

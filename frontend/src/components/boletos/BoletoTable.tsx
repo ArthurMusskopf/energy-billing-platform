@@ -23,9 +23,10 @@ interface BoletoTableProps {
   boletos: Boleto[];
   onValidate: (boletoId: string) => void;
   onGeneratePDF: (boletoId: string) => void;
+  busyIds?: Record<string, boolean>;
 }
 
-export function BoletoTable({ boletos, onValidate, onGeneratePDF }: BoletoTableProps) {
+export function BoletoTable({ boletos, onValidate, onGeneratePDF, busyIds = {} }: BoletoTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const toggleRow = (id: string) => {
@@ -114,12 +115,13 @@ export function BoletoTable({ boletos, onValidate, onGeneratePDF }: BoletoTableP
                           <Button
                             size="sm"
                             variant="default"
+                            disabled={Boolean(busyIds[boleto.id])}
                             onClick={(e) => {
                               e.stopPropagation();
                               onValidate(boleto.id);
                             }}
                           >
-                            <Check className="mr-1 h-4 w-4" /> Validar
+                            <Check className="mr-1 h-4 w-4" /> {busyIds[boleto.id] ? "Calculando..." : "Validar"}
                           </Button>
                         )}
                         {boleto.status === "validado" && (

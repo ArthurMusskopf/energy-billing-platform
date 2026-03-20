@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { mockClientes, mockFaturas } from "@/data/mockData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -14,49 +13,100 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Search, Filter, Download, Eye } from "lucide-react";
+import { getJson } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+
+interface ApiHistoricoEconomia {
+  mes: string;
+  valor: number;
+}
+
+interface ApiHistoricoFatura {
+  id: string;
+  referencia: string;
+  vencimento: string;
+  nota_fiscal_numero: string;
+  total: number;
+  status: "pendente" | "validado" | "erro";
+}
+
+interface ApiHistoricoCliente {
+  unidade_consumidora: string;
+  cliente_numero: string;
+  nome: string;
+  cnpj: string;
+  cep: string;
+  cidade_uf: string;
+  desconto_contratado: number;
+  subvencao: number;
+  status: string;
+  historico_economia: ApiHistoricoEconomia[];
+  faturas: ApiHistoricoFatura[];
+}
+
+interface ApiHistoricoResponse {
+  items: ApiHistoricoCliente[];
+}
 
 export default function HistoricoPage() {
+  const [clientes, setClientes] = useState<ApiHistoricoCliente[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCliente, setSelectedCliente] = useState<string | null>(null);
+  const { toast } = useToast();
 
-  const filteredClientes = mockClientes.filter(cliente =>
-    cliente.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cliente.unidade_consumidora.includes(searchTerm)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistorico() {
+      try {
+        const response = await getJson<ApiHistoricoResponse>("/historico");
+        if (!cancelled) {
+          setClientes(response.items ?? []);
+          if (!selectedCliente && response.items && response.items.length > 0) {
+            setSelectedCliente(response.items[0].unidade_consumidora);
+          }
+        }
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          toast({
+            title: "Erro ao carregar historico",
+            description: "Nao foi possivel buscar os dados reais do historico.",
+            variant: "destructive",
+          });
+        }
+      }
+    }
+
+    void loadHistorico();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [toast]);
+
+  const filteredClientes = clientes.filter(
+    (cliente) =>
+      cliente.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cliente.unidade_consumidora.includes(searchTerm)
   );
 
-  const clienteFaturas = selectedCliente 
-    ? mockFaturas.filter(f => f.unidade_consumidora === selectedCliente)
-    : [];
+  const clienteSelecionado =
+    clientes.find((cliente) => cliente.unidade_consumidora === selectedCliente) ?? null;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("pt-BR", {
       style: "currency",
-      currency: "BRL"
+      currency: "BRL",
     }).format(value);
   };
 
-  const historicoEconomia = [
-    { mes: "Jan/2025", valor: 0 },
-    { mes: "Fev/2025", valor: 0 },
-    { mes: "Mar/2025", valor: 0 },
-    { mes: "Abr/2025", valor: 0 },
-    { mes: "Mai/2025", valor: 0 },
-    { mes: "Jun/2025", valor: 0 },
-    { mes: "Jul/2025", valor: 0 },
-    { mes: "Ago/2025", valor: 0 },
-    { mes: "Set/2025", valor: 0 },
-    { mes: "Out/2025", valor: 228.08 },
-    { mes: "Nov/2025", valor: 0 },
-    { mes: "Dez/2025", valor: 0 },
-  ];
-
   return (
-    <MainLayout 
-      title="Histórico" 
+    <MainLayout
+      title="Histórico"
       subtitle="Consulte o histórico de faturas e economia dos clientes"
     >
       <div className="space-y-6 animate-fade-in">
-        {/* Busca */}
         <Card>
           <CardContent className="p-6">
             <div className="flex gap-4">
@@ -69,10 +119,26 @@ export default function HistoricoPage() {
                   className="pl-10"
                 />
               </div>
-              <Button variant="outline">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  toast({
+                    title: "Filtros mantidos simples",
+                    description: "A busca textual ja esta integrada aos dados reais.",
+                  })
+                }
+              >
                 <Filter className="mr-2 h-4 w-4" /> Filtros
               </Button>
-              <Button variant="outline">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  toast({
+                    title: "Exportacao ainda nao integrada",
+                    description: "Os dados reais ja estao visiveis, mas a exportacao nao faz parte desta entrega.",
+                  })
+                }
+              >
                 <Download className="mr-2 h-4 w-4" /> Exportar
               </Button>
             </div>
@@ -80,7 +146,6 @@ export default function HistoricoPage() {
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Lista de Clientes */}
           <Card className="lg:col-span-1">
             <CardHeader>
               <CardTitle className="text-lg">Clientes ({filteredClientes.length})</CardTitle>
@@ -92,13 +157,20 @@ export default function HistoricoPage() {
                     key={cliente.unidade_consumidora}
                     onClick={() => setSelectedCliente(cliente.unidade_consumidora)}
                     className={`w-full p-4 text-left border-b transition-colors hover:bg-muted/50 ${
-                      selectedCliente === cliente.unidade_consumidora ? "bg-primary/5 border-l-4 border-l-primary" : ""
+                      selectedCliente === cliente.unidade_consumidora
+                        ? "bg-primary/5 border-l-4 border-l-primary"
+                        : ""
                     }`}
                   >
                     <p className="font-medium text-sm truncate">{cliente.nome}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-muted-foreground">UC: {cliente.unidade_consumidora}</span>
-                      <Badge variant={cliente.status === "Ativo" ? "default" : "secondary"} className="text-xs">
+                      <span className="text-xs text-muted-foreground">
+                        UC: {cliente.unidade_consumidora}
+                      </span>
+                      <Badge
+                        variant={cliente.status === "Ativo" ? "default" : "secondary"}
+                        className="text-xs"
+                      >
                         {cliente.status}
                       </Badge>
                     </div>
@@ -108,51 +180,43 @@ export default function HistoricoPage() {
             </CardContent>
           </Card>
 
-          {/* Detalhes do Cliente */}
           <div className="lg:col-span-2 space-y-6">
-            {selectedCliente ? (
+            {clienteSelecionado ? (
               <>
-                {/* Info do Cliente */}
-                {(() => {
-                  const cliente = mockClientes.find(c => c.unidade_consumidora === selectedCliente);
-                  return cliente && (
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <CardTitle className="text-xl">{cliente.nome}</CardTitle>
-                            <p className="text-sm text-muted-foreground mt-1">{cliente.cnpj}</p>
-                          </div>
-                          <Badge variant={cliente.status === "Ativo" ? "default" : "secondary"}>
-                            {cliente.status}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div>
-                            <p className="text-sm text-muted-foreground">Unidade Consumidora</p>
-                            <p className="font-medium">{cliente.unidade_consumidora}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-muted-foreground">Cidade/UF</p>
-                            <p className="font-medium">{cliente.cidade_uf}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-muted-foreground">Desconto Contratado</p>
-                            <p className="font-medium">{cliente.desconto_contratado}%</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-muted-foreground">Subvenção</p>
-                            <p className="font-medium">{formatCurrency(cliente.subvencao)}</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-xl">{clienteSelecionado.nome}</CardTitle>
+                        <p className="text-sm text-muted-foreground mt-1">{clienteSelecionado.cnpj}</p>
+                      </div>
+                      <Badge variant={clienteSelecionado.status === "Ativo" ? "default" : "secondary"}>
+                        {clienteSelecionado.status}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Unidade Consumidora</p>
+                        <p className="font-medium">{clienteSelecionado.unidade_consumidora}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Cidade/UF</p>
+                        <p className="font-medium">{clienteSelecionado.cidade_uf}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Desconto Contratado</p>
+                        <p className="font-medium">{clienteSelecionado.desconto_contratado}%</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Subvenção</p>
+                        <p className="font-medium">{formatCurrency(clienteSelecionado.subvencao)}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-                {/* Histórico de Economia */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg">Histórico de Economia (R$)</CardTitle>
@@ -162,7 +226,7 @@ export default function HistoricoPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            {historicoEconomia.map((item) => (
+                            {clienteSelecionado.historico_economia.map((item) => (
                               <TableHead key={item.mes} className="text-center min-w-[80px]">
                                 {item.mes.split("/")[0]}
                               </TableHead>
@@ -171,10 +235,12 @@ export default function HistoricoPage() {
                         </TableHeader>
                         <TableBody>
                           <TableRow>
-                            {historicoEconomia.map((item) => (
+                            {clienteSelecionado.historico_economia.map((item) => (
                               <TableCell key={item.mes} className="text-center">
                                 {item.valor > 0 ? (
-                                  <span className="font-medium text-success">{formatCurrency(item.valor)}</span>
+                                  <span className="font-medium text-success">
+                                    {formatCurrency(item.valor)}
+                                  </span>
                                 ) : (
                                   <span className="text-muted-foreground">R$ -</span>
                                 )}
@@ -187,10 +253,11 @@ export default function HistoricoPage() {
                   </CardContent>
                 </Card>
 
-                {/* Faturas */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Faturas ({clienteFaturas.length})</CardTitle>
+                    <CardTitle className="text-lg">
+                      Faturas ({clienteSelecionado.faturas.length})
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
                     <Table>
@@ -205,7 +272,7 @@ export default function HistoricoPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {clienteFaturas.map((fatura) => (
+                        {clienteSelecionado.faturas.map((fatura) => (
                           <TableRow key={fatura.id}>
                             <TableCell className="font-medium">{fatura.referencia}</TableCell>
                             <TableCell>{fatura.vencimento}</TableCell>
@@ -214,21 +281,40 @@ export default function HistoricoPage() {
                               {formatCurrency(fatura.total)}
                             </TableCell>
                             <TableCell>
-                              <Badge 
+                              <Badge
                                 variant={fatura.status === "validado" ? "default" : "secondary"}
-                                className={fatura.status === "validado" ? "bg-success/10 text-success border-success/20" : ""}
+                                className={
+                                  fatura.status === "validado"
+                                    ? "bg-success/10 text-success border-success/20"
+                                    : fatura.status === "erro"
+                                      ? "bg-destructive/10 text-destructive border-destructive/20"
+                                      : ""
+                                }
                               >
-                                {fatura.status === "validado" ? "Validado" : "Pendente"}
+                                {fatura.status === "validado"
+                                  ? "Validado"
+                                  : fatura.status === "erro"
+                                    ? "Erro"
+                                    : "Pendente"}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">
-                              <Button variant="ghost" size="sm">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  toast({
+                                    title: "Use a tela de Faturas",
+                                    description: `A fatura ${fatura.nota_fiscal_numero} pode ser inspecionada em detalhes na tela principal de Faturas.`,
+                                  })
+                                }
+                              >
                                 <Eye className="h-4 w-4" />
                               </Button>
                             </TableCell>
                           </TableRow>
                         ))}
-                        {clienteFaturas.length === 0 && (
+                        {clienteSelecionado.faturas.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                               Nenhuma fatura encontrada para este cliente.
