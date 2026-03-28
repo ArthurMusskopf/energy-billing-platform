@@ -13,6 +13,36 @@ export interface FaturaItem {
   tarifa_sem_trib: number;
 }
 
+export interface FaturaMedidor {
+  id: string;
+  medidor: string;
+  tipo: string;
+  posto: string;
+  leitura_anterior: string;
+  leitura_atual: string;
+  total_apurado: number;
+}
+
+export interface FaturaCadastroMinimo {
+  unidade_consumidora: string;
+  cliente_numero: string;
+  nome: string;
+  cnpj: string;
+  cep: string;
+  cidade_uf: string;
+  desconto_contratado: number | null;
+  subvencao: number | null;
+  status: string;
+  n_fases: number | null;
+  custo_disp: number | null;
+  campos_pendentes: string[];
+  cadastro_minimo_completo: boolean;
+  elegivel_para_calculo: boolean;
+  uc_cadastrada: boolean;
+  origem?: string;
+  motivo_bloqueio?: string;
+}
+
 export interface Fatura {
   id: string;
   unidade_consumidora: string;
@@ -32,14 +62,20 @@ export interface Fatura {
   cidade_uf: string;
   cep: string;
   itens: FaturaItem[];
-  status: 'pendente' | 'validado' | 'erro';
+  medidores?: FaturaMedidor[];
+  cadastro?: FaturaCadastroMinimo;
+  campos_pendentes_cadastro?: string[];
+  motivo_bloqueio?: string;
+  pode_validar_calcular?: boolean;
+  status_calculo?: string;
+  status: "pendente" | "validado" | "erro";
   alertas: Alerta[];
 }
 
 export interface Alerta {
   id: string;
   campo: string;
-  tipo: 'warning' | 'error';
+  tipo: "warning" | "error";
   mensagem: string;
   valor_atual: number;
   valor_esperado: number;
@@ -55,7 +91,7 @@ export interface Cliente {
   cidade_uf: string;
   desconto_contratado: number;
   subvencao: number;
-  status: 'Ativo' | 'Inativo';
+  status: "Ativo" | "Inativo";
 }
 
 export interface Boleto {
@@ -71,7 +107,7 @@ export interface Boleto {
   bandeiras_com_desconto: number;
   valor_total: number;
   economia_gerada: number;
-  status: 'pendente' | 'validado' | 'gerado';
+  status: "pendente" | "validado" | "gerado";
   faturas: Fatura[];
 }
 

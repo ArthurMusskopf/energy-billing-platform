@@ -95,10 +95,33 @@ def _normalize_fases_truncadas(s: str) -> str:
     return s
 
 
-def parse_unidade_consumidora(txt: str) -> Optional[str]:
+def parse_cliente_numero(txt: str) -> Optional[str]:
+    return safe_search(r"\bCliente\s*:\s*([0-9]+)", txt, flags=re.I)
+
+
+def _normalize_numeric_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip().lstrip("0")
+    return cleaned or "0"
+
+
+def parse_unidade_consumidora(txt: str, cliente_numero: Optional[str] = None) -> Optional[str]:
+    cliente_norm = _normalize_numeric_id(cliente_numero)
+
+    def _candidate(value: str) -> Optional[str]:
+        uc = _normalize_numeric_id(value)
+        if not uc:
+            return None
+        if cliente_norm and uc == cliente_norm:
+            return None
+        return uc
+
     m = re.search(r"Unidade\s+Consumidora\s*\n?\s*0*([0-9]{8,12})", txt, flags=re.I)
     if m:
-        return m.group(1).lstrip("0") or m.group(1)
+        uc = _candidate(m.group(1))
+        if uc:
+            return uc
 
     lines = txt.splitlines()
     stop = min(len(lines), 40)
@@ -110,11 +133,15 @@ def parse_unidade_consumidora(txt: str) -> Optional[str]:
     for l in lines[:stop]:
         lm = re.match(r"^\s*0*([0-9]{8,12})\s*$", l)
         if lm:
-            return lm.group(1).lstrip("0") or lm.group(1)
+            uc = _candidate(lm.group(1))
+            if uc:
+                return uc
 
     m = re.search(r"(?<!\d)0*([0-9]{8,12})(?![\d/])", txt)
     if m:
-        return m.group(1).lstrip("0") or m.group(1)
+        uc = _candidate(m.group(1))
+        if uc:
+            return uc
 
     return None
 
@@ -223,8 +250,8 @@ def parse_header(txt: str) -> dict:
     h["classe_modalidade"] = parse_classe_modalidade(txt)
     h["n_fases_parseado"] = infer_n_fases(h.get("classe_modalidade"))
 
-    h["unidade_consumidora"] = parse_unidade_consumidora(txt)
-    h["cliente_numero"] = safe_search(r"\bCliente\s*:\s*([0-9]+)", txt, flags=re.I)
+    h["cliente_numero"] = parse_cliente_numero(txt)
+    h["unidade_consumidora"] = parse_unidade_consumidora(txt, cliente_numero=h["cliente_numero"])
 
     m = re.search(r"(\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+R\$?\s*([0-9\.,]+)", txt)
     if m:

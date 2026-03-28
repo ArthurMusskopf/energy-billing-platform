@@ -95,6 +95,7 @@ def build_workflow_from_parse_results(
 
     for r in resultados or []:
         header = getattr(r, "header", {}) or {}
+        periodo = getattr(r, "periodo", {}) or {}
         nf = getattr(r, "nf", {}) or {}
         df_itens = getattr(r, "df_itens", pd.DataFrame())
         arquivo = _safe_str(getattr(r, "arquivo", None))
@@ -114,6 +115,24 @@ def build_workflow_from_parse_results(
         total_pagar = _safe_float(header.get("total_pagar"))
         if total_pagar is None:
             total_pagar = _safe_float(_first_non_null(df_itens, "total_pagar"))
+        leitura_anterior = _safe_str(periodo.get("leitura_anterior")) or _safe_str(
+            _first_non_null(df_itens, "leitura_anterior")
+        )
+        leitura_atual = _safe_str(periodo.get("leitura_atual")) or _safe_str(
+            _first_non_null(df_itens, "leitura_atual")
+        )
+        dias = _safe_int(periodo.get("dias"))
+        if dias is None:
+            dias = _safe_int(_first_non_null(df_itens, "dias"))
+        proxima_leitura = _safe_str(periodo.get("proxima_leitura")) or _safe_str(
+            _first_non_null(df_itens, "proxima_leitura")
+        )
+        nota_fiscal_serie = _safe_str(nf.get("serie")) or _safe_str(_first_non_null(df_itens, "serie"))
+        nota_fiscal_emissao = _safe_str(nf.get("data_emissao")) or _safe_str(
+            _first_non_null(df_itens, "data_emissao")
+        )
+        cidade_uf = _safe_str(header.get("cidade_uf")) or _safe_str(_first_non_null(df_itens, "cidade_uf"))
+        cep = _safe_str(header.get("cep")) or _safe_str(_first_non_null(df_itens, "cep"))
 
         if not nota_fiscal:
             continue
@@ -141,6 +160,14 @@ def build_workflow_from_parse_results(
             "classe_modalidade": classe_modalidade,
             "grupo_subgrupo_tensao": grupo_subgrupo_tensao,
             "total_pagar": total_pagar,
+            "leitura_anterior": leitura_anterior,
+            "leitura_atual": leitura_atual,
+            "dias": dias,
+            "proxima_leitura": proxima_leitura,
+            "nota_fiscal_serie": nota_fiscal_serie,
+            "nota_fiscal_emissao": nota_fiscal_emissao,
+            "cidade_uf": cidade_uf,
+            "cep": cep,
             "arquivo_nome_original": arquivo,
             "arquivo_hash": _safe_str(arquivo_hash_by_name.get(arquivo)),
             "pdf_uri": _safe_str(pdf_uri_by_name.get(arquivo)),
