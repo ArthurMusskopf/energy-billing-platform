@@ -95,10 +95,51 @@ def _normalize_fases_truncadas(s: str) -> str:
     return s
 
 
-def parse_unidade_consumidora(txt: str) -> Optional[str]:
-    m = re.search(r"Unidade\s+Consumidora\s*\n?\s*0*([0-9]{8,12})", txt, flags=re.I)
-    if m:
-        return m.group(1).lstrip("0") or m.group(1)
+def _normalize_numeric_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    digits = re.sub(r"\D+", "", str(value))
+    if not digits:
+        return None
+    return digits.lstrip("0") or digits
+
+
+def parse_cliente_numero(txt: str) -> Optional[str]:
+    patterns = [
+        r"\bCliente\s*:\s*0*([0-9]{6,12})\b",
+        r"\bC[oó]digo\s+do\s+Cliente\s*:\s*0*([0-9]{6,12})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, txt, flags=re.I)
+        if match:
+            return _normalize_numeric_code(match.group(1))
+    return None
+
+
+def parse_unidade_consumidora(txt: str, cliente_numero: Optional[str] = None) -> Optional[str]:
+    cliente_numero_norm = _normalize_numeric_code(cliente_numero)
+    label_patterns = [
+        r"Unidade\s+Consumidora\s*[:\-]?\s*\n?\s*0*([0-9]{8,12})",
+        r"\bUC\s*[:\-]?\s*0*([0-9]{8,12})\b",
+    ]
+    for pattern in label_patterns:
+        m = re.search(pattern, txt, flags=re.I)
+        if m:
+            candidate = _normalize_numeric_code(m.group(1))
+            if candidate and candidate != cliente_numero_norm:
+                return candidate
+
+    lines = [clean_spaces(line) or "" for line in txt.splitlines()]
+    for idx, line in enumerate(lines):
+        if not re.search(r"Unidade\s+Consumidora", line, flags=re.I):
+            continue
+
+        nearby = " ".join(lines[idx : idx + 3])
+        candidates = re.findall(r"\b0*([0-9]{8,12})\b", nearby)
+        for candidate in candidates:
+            normalized = _normalize_numeric_code(candidate)
+            if normalized and normalized != cliente_numero_norm:
+                return normalized
 
     lines = txt.splitlines()
     stop = min(len(lines), 40)
@@ -110,11 +151,14 @@ def parse_unidade_consumidora(txt: str) -> Optional[str]:
     for l in lines[:stop]:
         lm = re.match(r"^\s*0*([0-9]{8,12})\s*$", l)
         if lm:
-            return lm.group(1).lstrip("0") or lm.group(1)
+            candidate = _normalize_numeric_code(lm.group(1))
+            if candidate and candidate != cliente_numero_norm:
+                return candidate
 
-    m = re.search(r"(?<!\d)0*([0-9]{8,12})(?![\d/])", txt)
-    if m:
-        return m.group(1).lstrip("0") or m.group(1)
+    for candidate in re.findall(r"(?<!\d)0*([0-9]{8,12})(?![\d/])", txt):
+        normalized = _normalize_numeric_code(candidate)
+        if normalized and normalized != cliente_numero_norm:
+            return normalized
 
     return None
 
@@ -223,8 +267,8 @@ def parse_header(txt: str) -> dict:
     h["classe_modalidade"] = parse_classe_modalidade(txt)
     h["n_fases_parseado"] = infer_n_fases(h.get("classe_modalidade"))
 
-    h["unidade_consumidora"] = parse_unidade_consumidora(txt)
-    h["cliente_numero"] = safe_search(r"\bCliente\s*:\s*([0-9]+)", txt, flags=re.I)
+    h["cliente_numero"] = parse_cliente_numero(txt)
+    h["unidade_consumidora"] = parse_unidade_consumidora(txt, cliente_numero=h.get("cliente_numero"))
 
     m = re.search(r"(\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+R\$?\s*([0-9\.,]+)", txt)
     if m:
