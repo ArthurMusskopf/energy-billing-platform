@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
+from app.api.boletos import router as boletos_router
 from app.api.faturas import router as faturas_router
 from app.core.config import get_settings
 from app.schemas.health import HealthResponse
@@ -27,8 +28,8 @@ def meta():
         "environment": settings.app_env,
         "server_time": datetime.utcnow().isoformat() + "Z",
         "modules": {
-            "faturas": "partial",
-            "boletos": "planned",
+            "faturas": "operational-minimum",
+            "boletos": "partial",
             "dashboard": "planned",
             "historico": "planned",
             "integrations": {
@@ -37,16 +38,6 @@ def meta():
             },
         },
     }
-
-
-@router.get("/api/v1/boletos", tags=["boletos"])
-def list_boletos():
-    return {
-        "items": [],
-        "total": 0,
-        "message": "Endpoint base criado. Integracao com calc_engine e emissao Sicoob vira na proxima etapa."
-    }
-
 
 @router.get("/api/v1/dashboard/resumo", tags=["dashboard"])
 def dashboard_resumo():
@@ -65,4 +56,5 @@ def historico():
     }
 
 
+router.include_router(boletos_router)
 router.include_router(faturas_router)

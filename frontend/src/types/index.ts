@@ -96,6 +96,8 @@ export interface Cliente {
 
 export interface Boleto {
   id: string;
+  workflow_id?: string;
+  nota_fiscal?: string;
   cliente: Cliente;
   referencia: string;
   vencimento: string;
@@ -106,8 +108,12 @@ export interface Boleto {
   bandeiras: number;
   bandeiras_com_desconto: number;
   valor_total: number;
+  valor_concessionaria?: number;
   economia_gerada: number;
-  status: "pendente" | "validado" | "gerado";
+  status: "pendente" | "validado" | "gerado" | "calculada";
+  status_validacao?: string;
+  status_calculo?: string;
+  status_emissao?: string;
   faturas: Fatura[];
 }
 

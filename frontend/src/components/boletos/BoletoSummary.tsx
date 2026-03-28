@@ -3,14 +3,14 @@ import { Card, CardContent } from "@/components/ui/card";
 
 interface BoletoSummaryProps {
   totalBoletos: number;
-  boletosValidados: number;
+  boletosCalculados: number;
   valorTotal: number;
   economiaTotal: number;
 }
 
 export function BoletoSummary({
   totalBoletos,
-  boletosValidados,
+  boletosCalculados,
   valorTotal,
   economiaTotal
 }: BoletoSummaryProps) {
@@ -30,8 +30,8 @@ export function BoletoSummary({
       bgColor: "bg-primary/10"
     },
     {
-      label: "Validados",
-      value: boletosValidados.toString(),
+      label: "Calculados",
+      value: boletosCalculados.toString(),
       icon: CheckCircle,
       color: "text-success",
       bgColor: "bg-success/10"

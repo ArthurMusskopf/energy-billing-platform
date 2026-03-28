@@ -109,17 +109,28 @@ def _normalize_numeric_id(value: Optional[str]) -> Optional[str]:
 def parse_unidade_consumidora(txt: str, cliente_numero: Optional[str] = None) -> Optional[str]:
     cliente_norm = _normalize_numeric_id(cliente_numero)
 
-    def _candidate(value: str) -> Optional[str]:
+    def _candidate(value: str, *, allow_same_as_cliente: bool = False) -> Optional[str]:
         uc = _normalize_numeric_id(value)
         if not uc:
             return None
-        if cliente_norm and uc == cliente_norm:
+        if not allow_same_as_cliente and cliente_norm and uc == cliente_norm:
             return None
         return uc
 
+    m = re.search(
+        r"Unidade\s+Consumidora\s+Nosso\s+N[uú]mero\s+Refer[êe]ncia\s+Vencimento.*?\n"
+        r"\s*[0-9]{2}/[0-9]{2}/[0-9]{4}\s+\S+\s+0*([0-9]{8,12})\s+[0-9]{2}/[0-9]{4}",
+        txt,
+        flags=re.I | re.S,
+    )
+    if m:
+        uc = _candidate(m.group(1), allow_same_as_cliente=True)
+        if uc:
+            return uc
+
     m = re.search(r"Unidade\s+Consumidora\s*\n?\s*0*([0-9]{8,12})", txt, flags=re.I)
     if m:
-        uc = _candidate(m.group(1))
+        uc = _candidate(m.group(1), allow_same_as_cliente=True)
         if uc:
             return uc
 
@@ -186,14 +197,19 @@ def parse_periodo_leituras(txt: str) -> dict:
         )
         return out
 
-    raw_pat = r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+([0-9]{2}/[0-9]{2}/[0-9]{4})\s+([0-9]{1,3})\s+([0-9]{2}/[0-9]{2}/[0-9]{4})"
+    raw_pat = (
+        r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+"
+        r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+"
+        r"([0-9]{1,3})(?:\s+(?:Lida|Lido|Lidas|Lidos))?\s+"
+        r"([0-9]{2}/[0-9]{2}/[0-9]{4})"
+    )
     m = re.search(raw_pat, txt, flags=re.I)
     if m:
         out.update(
             {
                 "leitura_anterior": la or m.group(1),
                 "leitura_atual": lt or m.group(2),
-                "dias": di if di is not None else int(m.group(3)),
+                "dias": int(m.group(3)),
                 "proxima_leitura": pl or m.group(4),
             }
         )
