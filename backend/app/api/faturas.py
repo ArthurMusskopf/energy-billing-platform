@@ -23,6 +23,7 @@ from app.schemas.faturas import (
     FaturaDetalheSchema,
     FaturaParseErroArquivoSchema,
     FaturaParseResumoSchema,
+    FaturaRevisaoRequestSchema,
     FaturaValidacaoRequestSchema,
     FaturaValidacaoResponseSchema,
     FaturasListResponseSchema,
@@ -38,6 +39,56 @@ from app.services import (
 
 router = APIRouter(prefix="/api/v1/faturas", tags=["faturas"])
 settings = get_settings()
+
+CADASTRO_REQUIRED_FIELDS = {
+    "unidade_consumidora": "UC",
+    "cliente_numero": "codigo_cliente",
+    "nome": "nome",
+    "cnpj_cpf": "cnpj_cpf",
+    "cep": "cep",
+    "cidade_uf": "cidade_uf",
+    "desconto_contratado": "desconto_contratado",
+    "subvencao": "subvencao",
+    "status": "status",
+    "custo_disp": "custo_disp",
+}
+
+WORKFLOW_PROPAGATION_FIELDS = {
+    "unidade_consumidora": "unidade_consumidora",
+    "cliente_numero": "cliente_numero",
+    "nome": "nome",
+    "cnpj_cpf": "cnpj_cpf",
+    "referencia": "referencia",
+    "vencimento": "vencimento",
+    "leitura_anterior": "leitura_anterior",
+    "leitura_atual": "leitura_atual",
+    "dias": "dias",
+    "proxima_leitura": "proxima_leitura",
+    "cep": "cep",
+    "cidade_uf": "cidade_uf",
+}
+
+ITEMS_PROPAGATION_FIELDS = {
+    "unidade_consumidora": "unidade_consumidora",
+    "cliente_numero": "cliente_numero",
+    "nome": "nome",
+    "cnpj_cpf": "cnpj",
+    "referencia": "referencia",
+    "vencimento": "vencimento",
+    "leitura_anterior": "leitura_anterior",
+    "leitura_atual": "leitura_atual",
+    "dias": "dias",
+    "proxima_leitura": "proxima_leitura",
+    "cep": "cep",
+    "cidade_uf": "cidade_uf",
+}
+
+MEDIDORES_PROPAGATION_FIELDS = {
+    "unidade_consumidora": "unidade_consumidora",
+    "cliente_numero": "cliente_numero",
+    "nome": "nome",
+    "referencia": "referencia",
+}
 
 
 def _now_utc() -> datetime:
@@ -61,7 +112,7 @@ def _safe_str(value: Any) -> Optional[str]:
     return text or None
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
     try:
         number = pd.to_numeric(value, errors="coerce")
         if pd.isna(number):
@@ -83,9 +134,43 @@ def _safe_int(value: Any) -> Optional[int]:
 
 def _normalize_percent(value: Any) -> float:
     number = _safe_float(value, default=0.0)
+    if number is None:
+        return 0.0
     if abs(number) <= 1:
         return number * 100
     return number
+
+
+def _normalize_discount_fraction(value: Any) -> Optional[float]:
+    number = _safe_float(value, default=None)
+    if number is None:
+        return None
+    if abs(number) > 1:
+        return number / 100.0
+    return number
+
+
+def _normalize_status(value: Any) -> Optional[str]:
+    status = _safe_str(value)
+    if not status:
+        return None
+    if status.lower() == "ativo":
+        return "Ativo"
+    if status.lower() == "inativo":
+        return "Inativo"
+    return status
+
+
+def _coalesce_value(*values: Any) -> Any:
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
 
 
 def _load_existing_workflow() -> pd.DataFrame:
@@ -247,97 +332,333 @@ def _build_fatura_detail_payload(
     workflow_df: pd.DataFrame,
     itens_df: pd.DataFrame,
     medidores_df: pd.DataFrame,
+    client_df: pd.DataFrame,
 ) -> dict:
     workflow = _safe_records(workflow_df)[0]
+    workflow_row = workflow_df.iloc[0]
     fatura_id = str(workflow.get("id"))
+    cadastro_cliente = _build_cadastro_cliente_payload(workflow_row, itens_df, client_df)
 
     detalhe = dict(workflow)
     detalhe.update(
         {
-            "leitura_anterior": _safe_str(_first_non_null(itens_df, "leitura_anterior")),
-            "leitura_atual": _safe_str(_first_non_null(itens_df, "leitura_atual")),
-            "dias": _safe_int(_first_non_null(itens_df, "dias")),
-            "proxima_leitura": _safe_str(_first_non_null(itens_df, "proxima_leitura")),
-            "nota_fiscal_serie": _safe_str(_first_non_null(itens_df, "serie")),
-            "nota_fiscal_emissao": _safe_str(_first_non_null(itens_df, "data_emissao")),
-            "cidade_uf": _safe_str(_first_non_null(itens_df, "cidade_uf")),
-            "cep": _safe_str(_first_non_null(itens_df, "cep")),
+            "leitura_anterior": _safe_str(
+                _coalesce_value(workflow.get("leitura_anterior"), _first_non_null(itens_df, "leitura_anterior"))
+            ),
+            "leitura_atual": _safe_str(
+                _coalesce_value(workflow.get("leitura_atual"), _first_non_null(itens_df, "leitura_atual"))
+            ),
+            "dias": _safe_int(_coalesce_value(workflow.get("dias"), _first_non_null(itens_df, "dias"))),
+            "proxima_leitura": _safe_str(
+                _coalesce_value(workflow.get("proxima_leitura"), _first_non_null(itens_df, "proxima_leitura"))
+            ),
+            "nota_fiscal_serie": _safe_str(
+                _coalesce_value(workflow.get("nota_fiscal_serie"), _first_non_null(itens_df, "serie"))
+            ),
+            "nota_fiscal_emissao": _safe_str(
+                _coalesce_value(workflow.get("nota_fiscal_emissao"), _first_non_null(itens_df, "data_emissao"))
+            ),
+            "cidade_uf": _safe_str(_coalesce_value(workflow.get("cidade_uf"), _first_non_null(itens_df, "cidade_uf"))),
+            "cep": _safe_str(_coalesce_value(workflow.get("cep"), _first_non_null(itens_df, "cep"))),
             "itens": _safe_records(itens_df),
             "medidores": _safe_records(medidores_df),
             "alertas": _build_alertas(_safe_str(workflow.get("observacoes")), fatura_id),
+            "cadastro_cliente": cadastro_cliente,
+            "campos_pendentes_cadastro": cadastro_cliente.get("campos_pendentes", []),
+            "pode_validar_calcular": bool(
+                cadastro_cliente.get("elegivel_para_calculo")
+                and _safe_str(workflow.get("status_parse")) != "erro_parse"
+                and itens_df is not None
+                and not itens_df.empty
+                and medidores_df is not None
+                and not medidores_df.empty
+            ),
         }
     )
     return detalhe
 
 
-def _build_client_df_for_calc(workflow_row: pd.Series) -> tuple[pd.DataFrame, Dict[str, str]]:
-    uc = _safe_str(workflow_row.get("unidade_consumidora")) or ""
-    warnings: Dict[str, str] = {}
-
-    if uc:
+def _get_client_df(
+    workflow_row: pd.Series,
+    *,
+    uc: Optional[str] = None,
+    cliente_numero: Optional[str] = None,
+) -> pd.DataFrame:
+    uc_value = _safe_str(uc) or _safe_str(workflow_row.get("unidade_consumidora"))
+    if uc_value:
         query = f"""
         SELECT *
         FROM `{TABLE_CLIENTES}`
         WHERE unidade_consumidora = @uc
         LIMIT 1
         """
-        client_df = _optional_query(query, {"uc": uc})
-    else:
-        client_df = pd.DataFrame()
+        client_df = _optional_query(query, {"uc": uc_value})
+        if client_df is not None and not client_df.empty:
+            return client_df
 
-    if client_df is None or client_df.empty:
-        warnings[uc or "sem_uc"] = "Cliente nao encontrado em info_clientes; calculo usou defaults."
-        client_df = pd.DataFrame(
-            [
-                {
-                    "unidade_consumidora": uc,
-                    "cliente_numero": _safe_str(workflow_row.get("cliente_numero")),
-                    "nome": _safe_str(workflow_row.get("nome")),
-                    "cnpj_cpf": _safe_str(workflow_row.get("cnpj_cpf")),
-                    "cep": None,
-                    "cidade_uf": None,
-                    "desconto_contratado": 0.0,
-                    "subvencao": 0.0,
-                    "status": "Ativo",
-                }
-            ]
+    cliente_value = _safe_str(cliente_numero) or _safe_str(workflow_row.get("cliente_numero"))
+    if cliente_value:
+        query = f"""
+        SELECT *
+        FROM `{TABLE_CLIENTES}`
+        WHERE cliente_numero = @cliente_numero
+        LIMIT 1
+        """
+        client_df = _optional_query(query, {"cliente_numero": cliente_value})
+        if client_df is not None and not client_df.empty:
+            return client_df
+
+    return pd.DataFrame()
+
+
+def _build_cadastro_cliente_payload(
+    workflow_row: pd.Series,
+    itens_df: pd.DataFrame,
+    client_df: pd.DataFrame,
+) -> dict:
+    client_row = _safe_records(client_df)[0] if client_df is not None and not client_df.empty else {}
+
+    n_fases = _safe_int(
+        _coalesce_value(
+            client_row.get("n_fases"),
+            workflow_row.get("n_fases"),
+            infer_n_fases(_safe_str(workflow_row.get("classe_modalidade"))),
+        )
+    )
+    custo_disp = _safe_float(
+        _coalesce_value(
+            client_row.get("custo_disp"),
+            workflow_row.get("custo_disp"),
+            compute_custo_disp(n_fases),
+        ),
+        default=None,
+    )
+
+    cadastro = {
+        "unidade_consumidora": _safe_str(
+            _coalesce_value(
+                client_row.get("unidade_consumidora"),
+                workflow_row.get("unidade_consumidora"),
+                _first_non_null(itens_df, "unidade_consumidora"),
+            )
+        ),
+        "cliente_numero": _safe_str(
+            _coalesce_value(
+                client_row.get("cliente_numero"),
+                workflow_row.get("cliente_numero"),
+                _first_non_null(itens_df, "cliente_numero"),
+            )
+        ),
+        "nome": _safe_str(
+            _coalesce_value(
+                client_row.get("nome"),
+                workflow_row.get("nome"),
+                _first_non_null(itens_df, "nome"),
+            )
+        ),
+        "cnpj_cpf": _safe_str(
+            _coalesce_value(
+                client_row.get("cnpj_cpf"),
+                client_row.get("cnpj"),
+                workflow_row.get("cnpj_cpf"),
+                _first_non_null(itens_df, "cnpj"),
+                _first_non_null(itens_df, "cnpj_cpf"),
+            )
+        ),
+        "cep": _safe_str(
+            _coalesce_value(
+                client_row.get("cep"),
+                workflow_row.get("cep"),
+                _first_non_null(itens_df, "cep"),
+            )
+        ),
+        "cidade_uf": _safe_str(
+            _coalesce_value(
+                client_row.get("cidade_uf"),
+                workflow_row.get("cidade_uf"),
+                _first_non_null(itens_df, "cidade_uf"),
+            )
+        ),
+        "desconto_contratado": _normalize_discount_fraction(client_row.get("desconto_contratado")),
+        "subvencao": _safe_float(client_row.get("subvencao"), default=None),
+        "status": _normalize_status(client_row.get("status")),
+        "n_fases": n_fases,
+        "custo_disp": custo_disp,
+        "origem": "info_clientes" if client_row else "parse",
+    }
+
+    campos_pendentes: List[str] = []
+    for field_name in CADASTRO_REQUIRED_FIELDS:
+        value = cadastro.get(field_name)
+        if field_name in {"desconto_contratado", "subvencao", "custo_disp"}:
+            if value is None:
+                campos_pendentes.append(field_name)
+            continue
+
+        if not _safe_str(value):
+            campos_pendentes.append(field_name)
+
+    cadastro["campos_pendentes"] = campos_pendentes
+    cadastro["cadastro_minimo_completo"] = len(campos_pendentes) == 0
+    cadastro["elegivel_para_calculo"] = bool(
+        cadastro["cadastro_minimo_completo"] and cadastro.get("status") == "Ativo"
+    )
+    return cadastro
+
+
+def _ensure_fatura_ready_for_calc(
+    workflow_row: pd.Series,
+    itens_df: pd.DataFrame,
+    medidores_df: pd.DataFrame,
+    cadastro_cliente: dict,
+) -> None:
+    if _safe_str(workflow_row.get("status_parse")) == "erro_parse":
+        raise HTTPException(
+            status_code=400,
+            detail="Nao e possivel calcular uma fatura com erro de parse.",
         )
 
-    client_df = client_df.copy()
+    if itens_df is None or itens_df.empty:
+        raise HTTPException(status_code=400, detail="A fatura nao possui itens parseados para calculo.")
 
-    if "status" not in client_df.columns:
-        client_df["status"] = "Ativo"
-    client_df["status"] = client_df["status"].fillna("Ativo")
+    if medidores_df is None or medidores_df.empty:
+        raise HTTPException(status_code=400, detail="A fatura nao possui medidores parseados para calculo.")
 
-    if "desconto_contratado" not in client_df.columns:
-        client_df["desconto_contratado"] = 0.0
-    client_df["desconto_contratado"] = pd.to_numeric(
-        client_df["desconto_contratado"], errors="coerce"
-    ).fillna(0.0)
+    campos_pendentes = cadastro_cliente.get("campos_pendentes", [])
+    if campos_pendentes:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Cadastro minimo incompleto para calcular a fatura.",
+                "fields": campos_pendentes,
+            },
+        )
 
-    if "subvencao" not in client_df.columns:
-        client_df["subvencao"] = 0.0
-    client_df["subvencao"] = pd.to_numeric(client_df["subvencao"], errors="coerce").fillna(0.0)
+    if cadastro_cliente.get("status") != "Ativo":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Cliente/UC sem status elegivel para calculo.",
+                "fields": ["status"],
+            },
+        )
 
-    classe_modalidade = _safe_str(workflow_row.get("classe_modalidade"))
-    inferred_n_fases = infer_n_fases(classe_modalidade)
-    inferred_custo_disp = compute_custo_disp(inferred_n_fases)
 
-    if "n_fases" not in client_df.columns:
-        client_df["n_fases"] = inferred_n_fases
-    else:
-        client_df["n_fases"] = pd.to_numeric(client_df["n_fases"], errors="coerce")
-        if inferred_n_fases is not None:
-            client_df["n_fases"] = client_df["n_fases"].fillna(inferred_n_fases)
+def _build_client_df_for_calc(
+    workflow_row: pd.Series,
+    itens_df: pd.DataFrame,
+    medidores_df: pd.DataFrame,
+) -> pd.DataFrame:
+    client_df = _get_client_df(workflow_row)
+    cadastro_cliente = _build_cadastro_cliente_payload(workflow_row, itens_df, client_df)
+    _ensure_fatura_ready_for_calc(workflow_row, itens_df, medidores_df, cadastro_cliente)
 
-    if "custo_disp" not in client_df.columns:
-        client_df["custo_disp"] = inferred_custo_disp
-    else:
-        client_df["custo_disp"] = pd.to_numeric(client_df["custo_disp"], errors="coerce")
-        if inferred_custo_disp is not None:
-            client_df["custo_disp"] = client_df["custo_disp"].fillna(inferred_custo_disp)
+    base_df = client_df.head(1).copy() if client_df is not None and not client_df.empty else pd.DataFrame([{}])
+    payload = {
+        "unidade_consumidora": cadastro_cliente.get("unidade_consumidora"),
+        "cliente_numero": cadastro_cliente.get("cliente_numero"),
+        "nome": cadastro_cliente.get("nome"),
+        "cnpj_cpf": cadastro_cliente.get("cnpj_cpf"),
+        "cep": cadastro_cliente.get("cep"),
+        "cidade_uf": cadastro_cliente.get("cidade_uf"),
+        "desconto_contratado": cadastro_cliente.get("desconto_contratado"),
+        "subvencao": cadastro_cliente.get("subvencao"),
+        "status": cadastro_cliente.get("status"),
+        "n_fases": cadastro_cliente.get("n_fases"),
+        "custo_disp": cadastro_cliente.get("custo_disp"),
+    }
 
-    return client_df, warnings
+    for key, value in payload.items():
+        base_df.loc[:, key] = value
+
+    return base_df
+
+
+def _apply_updates_to_df(
+    df: pd.DataFrame,
+    field_map: Dict[str, str],
+    updates: Dict[str, Any],
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    updated_df = df.copy()
+    for source_field, dest_field in field_map.items():
+        if source_field not in updates:
+            continue
+        updated_df.loc[:, dest_field] = updates[source_field]
+
+    return updated_df
+
+
+def _persist_cliente_from_review(
+    workflow_row: pd.Series,
+    itens_df: pd.DataFrame,
+    review_payload: FaturaRevisaoRequestSchema,
+) -> None:
+    nested = review_payload.cadastro_cliente
+    merged_payload = {
+        "unidade_consumidora": nested.unidade_consumidora if nested and nested.unidade_consumidora is not None else review_payload.unidade_consumidora,
+        "cliente_numero": nested.cliente_numero if nested and nested.cliente_numero is not None else review_payload.cliente_numero,
+        "nome": nested.nome if nested and nested.nome is not None else review_payload.nome,
+        "cnpj_cpf": nested.cnpj_cpf if nested and nested.cnpj_cpf is not None else review_payload.cnpj_cpf,
+        "cep": nested.cep if nested and nested.cep is not None else review_payload.cep,
+        "cidade_uf": nested.cidade_uf if nested and nested.cidade_uf is not None else review_payload.cidade_uf,
+        "desconto_contratado": nested.desconto_contratado if nested else None,
+        "subvencao": nested.subvencao if nested else None,
+        "status": nested.status if nested else None,
+        "n_fases": nested.n_fases if nested else None,
+        "custo_disp": nested.custo_disp if nested else None,
+    }
+
+    client_df = _get_client_df(
+        workflow_row,
+        uc=_safe_str(merged_payload.get("unidade_consumidora")),
+        cliente_numero=_safe_str(merged_payload.get("cliente_numero")),
+    )
+    cadastro_cliente = _build_cadastro_cliente_payload(workflow_row, itens_df, client_df)
+
+    for key, value in merged_payload.items():
+        if value is None:
+            continue
+        if key == "desconto_contratado":
+            cadastro_cliente[key] = _normalize_discount_fraction(value)
+        elif key == "subvencao":
+            cadastro_cliente[key] = _safe_float(value, default=None)
+        elif key == "status":
+            cadastro_cliente[key] = _normalize_status(value)
+        elif key == "n_fases":
+            cadastro_cliente[key] = _safe_int(value)
+        elif key == "custo_disp":
+            cadastro_cliente[key] = _safe_float(value, default=None)
+        else:
+            cadastro_cliente[key] = _safe_str(value)
+
+    if cadastro_cliente.get("n_fases") is None:
+        cadastro_cliente["n_fases"] = infer_n_fases(_safe_str(workflow_row.get("classe_modalidade")))
+
+    if cadastro_cliente.get("custo_disp") is None:
+        cadastro_cliente["custo_disp"] = compute_custo_disp(_safe_int(cadastro_cliente.get("n_fases")))
+
+    if not _safe_str(cadastro_cliente.get("unidade_consumidora")):
+        return
+
+    client_payload = {
+        "unidade_consumidora": cadastro_cliente.get("unidade_consumidora"),
+        "cliente_numero": cadastro_cliente.get("cliente_numero"),
+        "nome": cadastro_cliente.get("nome"),
+        "cnpj_cpf": cadastro_cliente.get("cnpj_cpf"),
+        "cep": cadastro_cliente.get("cep"),
+        "cidade_uf": cadastro_cliente.get("cidade_uf"),
+        "desconto_contratado": cadastro_cliente.get("desconto_contratado"),
+        "subvencao": cadastro_cliente.get("subvencao"),
+        "status": cadastro_cliente.get("status"),
+        "n_fases": cadastro_cliente.get("n_fases"),
+        "custo_disp": cadastro_cliente.get("custo_disp"),
+        "updated_at": _now_utc(),
+    }
+
+    upsert_dataframe(pd.DataFrame([client_payload]), TABLE_CLIENTES, key_column="unidade_consumidora")
 
 
 def _sum_item_quantity(itens_df: pd.DataFrame, codigos: set[str]) -> float:
@@ -423,8 +744,10 @@ def _build_boleto_calc_row(
             "cliente_numero": _safe_str(workflow_row.get("cliente_numero")),
             "unidade_consumidora": _safe_str(workflow_row.get("unidade_consumidora")),
             "cnpj_cpf": _safe_str(workflow_row.get("cnpj_cpf")),
-            "cep": _safe_str(_first_non_null(itens_df, "cep")),
-            "cidade_uf": _safe_str(_first_non_null(itens_df, "cidade_uf")),
+            "cep": _safe_str(_coalesce_value(workflow_row.get("cep"), _first_non_null(itens_df, "cep"))),
+            "cidade_uf": _safe_str(
+                _coalesce_value(workflow_row.get("cidade_uf"), _first_non_null(itens_df, "cidade_uf"))
+            ),
             "consumo_kwh": _sum_item_quantity(itens_df, {"0D", "0E"}),
             "injetada_kwh": energia_compensada,
             "tarifa_injetada": _safe_float(calc_row.get("tarifa_bol")),
@@ -441,6 +764,98 @@ def _build_boleto_calc_row(
     )
 
     return pd.DataFrame([payload])
+
+
+def _load_fatura_context(fatura_id: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    workflow_df = _get_workflow_df(fatura_id)
+    workflow_row = workflow_df.iloc[0]
+    itens_df = _get_itens_df(fatura_id)
+    medidores_df = _get_medidores_df(fatura_id)
+    client_df = _get_client_df(workflow_row)
+    return workflow_df, itens_df, medidores_df, client_df
+
+
+def _mark_fatura_validada(fatura_id: str, usuario: str) -> dict:
+    return _update_workflow_row(
+        fatura_id,
+        {
+            "status_validacao": "validado",
+            "validado_por": usuario,
+            "validado_em": _now_utc(),
+        },
+    )
+
+
+def _calculate_fatura_impl(fatura_id: str, usuario_validacao: Optional[str] = None) -> dict:
+    workflow_df = _get_workflow_df(fatura_id)
+    workflow_row = workflow_df.iloc[0]
+    itens_df = _get_itens_df(fatura_id)
+    medidores_df = _get_medidores_df(fatura_id)
+
+    client_df = _build_client_df_for_calc(workflow_row, itens_df, medidores_df)
+    calc_result = calculate_boletos(
+        itens_df,
+        medidores_df,
+        client_df,
+        only_registered_clients=True,
+        only_status_ativo=True,
+    )
+
+    boleto_df = calc_result.df_boletos.copy()
+    if boleto_df is None or boleto_df.empty:
+        detail = "Nao houve linhas elegiveis para calculo."
+        updated = _update_workflow_row(
+            fatura_id,
+            {
+                "status_calculo": "erro_calculo",
+                "calculado_em": _now_utc(),
+                "observacoes": _append_observacao(workflow_row.get("observacoes"), detail),
+            },
+        )
+        return {
+            "id": updated["id"],
+            "status_calculo": updated.get("status_calculo") or "erro_calculo",
+            "calculado_em": updated.get("calculado_em"),
+            "table": TABLE_BOLETOS,
+            "affected_rows": 0,
+            "missing_clientes": calc_result.missing_clientes,
+            "missing_reason": calc_result.missing_reason,
+            "detail": detail,
+        }
+
+    boleto_df = boleto_df[boleto_df["numero"].astype(str) == str(fatura_id)].copy()
+    if boleto_df.empty:
+        boleto_df = calc_result.df_boletos.head(1).copy()
+
+    existing_boleto_df = _get_boleto_df(fatura_id)
+    persist_df = _build_boleto_calc_row(workflow_row, itens_df, boleto_df, existing_boleto_df)
+    affected = upsert_dataframe(persist_df, TABLE_BOLETOS, key_column="id")
+
+    update_payload = {
+        "status_calculo": "calculado",
+        "calculado_em": _now_utc(),
+    }
+    if _safe_str(workflow_row.get("status_validacao")) != "validado":
+        update_payload.update(
+            {
+                "status_validacao": "validado",
+                "validado_por": usuario_validacao or _safe_str(workflow_row.get("validado_por")) or "calculo",
+                "validado_em": _coalesce_value(workflow_row.get("validado_em"), _now_utc()),
+            }
+        )
+
+    updated = _update_workflow_row(fatura_id, update_payload)
+
+    return {
+        "id": updated["id"],
+        "status_calculo": updated.get("status_calculo") or "calculado",
+        "calculado_em": updated.get("calculado_em"),
+        "table": TABLE_BOLETOS,
+        "affected_rows": int(affected),
+        "missing_clientes": calc_result.missing_clientes,
+        "missing_reason": calc_result.missing_reason,
+        "detail": "Calculo persistido sem emissao Sicoob.",
+    }
 
 
 @router.get("", response_model=FaturasListResponseSchema)
@@ -501,6 +916,14 @@ def list_faturas(
       classe_modalidade,
       grupo_subgrupo_tensao,
       total_pagar,
+      leitura_anterior,
+      leitura_atual,
+      dias,
+      proxima_leitura,
+      nota_fiscal_serie,
+      nota_fiscal_emissao,
+      cidade_uf,
+      cep,
       arquivo_nome_original,
       arquivo_hash,
       pdf_uri,
@@ -554,14 +977,84 @@ def list_faturas(
 @router.get("/{fatura_id}", response_model=FaturaDetalheSchema)
 def get_fatura_detail(fatura_id: str):
     try:
-        workflow_df = _get_workflow_df(fatura_id)
-        itens_df = _get_itens_df(fatura_id)
-        medidores_df = _get_medidores_df(fatura_id)
-        return _build_fatura_detail_payload(workflow_df, itens_df, medidores_df)
+        workflow_df, itens_df, medidores_df, client_df = _load_fatura_context(fatura_id)
+        return _build_fatura_detail_payload(workflow_df, itens_df, medidores_df, client_df)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao carregar detalhe da fatura: {exc}")
+
+
+@router.patch("/{fatura_id}/revisao", response_model=FaturaDetalheSchema)
+def revisar_fatura(
+    fatura_id: str,
+    payload: FaturaRevisaoRequestSchema,
+):
+    try:
+        workflow_df, itens_df, medidores_df, _ = _load_fatura_context(fatura_id)
+
+        shared_workflow_values = {
+            "unidade_consumidora": payload.cadastro_cliente.unidade_consumidora
+            if payload.cadastro_cliente and payload.cadastro_cliente.unidade_consumidora is not None
+            else payload.unidade_consumidora,
+            "cliente_numero": payload.cadastro_cliente.cliente_numero
+            if payload.cadastro_cliente and payload.cadastro_cliente.cliente_numero is not None
+            else payload.cliente_numero,
+            "nome": payload.cadastro_cliente.nome
+            if payload.cadastro_cliente and payload.cadastro_cliente.nome is not None
+            else payload.nome,
+            "cnpj_cpf": payload.cadastro_cliente.cnpj_cpf
+            if payload.cadastro_cliente and payload.cadastro_cliente.cnpj_cpf is not None
+            else payload.cnpj_cpf,
+            "cep": payload.cadastro_cliente.cep
+            if payload.cadastro_cliente and payload.cadastro_cliente.cep is not None
+            else payload.cep,
+            "cidade_uf": payload.cadastro_cliente.cidade_uf
+            if payload.cadastro_cliente and payload.cadastro_cliente.cidade_uf is not None
+            else payload.cidade_uf,
+            "referencia": payload.referencia,
+            "vencimento": payload.vencimento,
+            "leitura_anterior": payload.leitura_anterior,
+            "leitura_atual": payload.leitura_atual,
+            "dias": _safe_int(payload.dias) if payload.dias is not None else None,
+            "proxima_leitura": payload.proxima_leitura,
+        }
+        workflow_updates: Dict[str, Any] = {}
+        for key, value in shared_workflow_values.items():
+            if value is None:
+                continue
+            workflow_updates[key] = value
+
+        has_review_changes = bool(workflow_updates) or payload.cadastro_cliente is not None
+        updated_workflow_df = workflow_df.copy()
+        if workflow_updates:
+            updated_workflow_df = _apply_updates_to_df(updated_workflow_df, WORKFLOW_PROPAGATION_FIELDS, workflow_updates)
+
+        if has_review_changes:
+            updated_workflow_df.loc[:, "status_validacao"] = "pendente"
+            updated_workflow_df.loc[:, "validado_por"] = None
+            updated_workflow_df.loc[:, "validado_em"] = None
+            updated_workflow_df.loc[:, "status_calculo"] = "nao_calculada"
+            updated_workflow_df.loc[:, "calculado_em"] = None
+            updated_workflow_df.loc[:, "updated_at"] = _now_utc()
+            upsert_dataframe(updated_workflow_df, TABLE_FATURAS_WORKFLOW, key_column="id")
+
+        updated_itens_df = _apply_updates_to_df(itens_df, ITEMS_PROPAGATION_FIELDS, workflow_updates)
+        if updated_itens_df is not None and not updated_itens_df.empty and workflow_updates:
+            upsert_dataframe(updated_itens_df, TABLE_FATURA_ITENS, key_column="id")
+
+        updated_medidores_df = _apply_updates_to_df(medidores_df, MEDIDORES_PROPAGATION_FIELDS, workflow_updates)
+        if updated_medidores_df is not None and not updated_medidores_df.empty and workflow_updates:
+            upsert_dataframe(updated_medidores_df, TABLE_MEDIDORES, key_column="id")
+
+        _persist_cliente_from_review(updated_workflow_df.iloc[0], updated_itens_df, payload)
+
+        workflow_df, itens_df, medidores_df, client_df = _load_fatura_context(fatura_id)
+        return _build_fatura_detail_payload(workflow_df, itens_df, medidores_df, client_df)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar revisao da fatura: {exc}")
 
 
 @router.patch("/{fatura_id}/validar", response_model=FaturaValidacaoResponseSchema)
@@ -570,23 +1063,28 @@ def validar_fatura(
     payload: Optional[FaturaValidacaoRequestSchema] = None,
 ):
     usuario = (payload.usuario if payload else None) or "frontend"
-    now = _now_utc()
 
     try:
-        updated = _update_workflow_row(
-            fatura_id,
-            {
-                "status_validacao": "validado",
-                "validado_por": usuario,
-                "validado_em": now,
-            },
-        )
+        workflow_df, itens_df, medidores_df, client_df = _load_fatura_context(fatura_id)
+        cadastro_cliente = _build_cadastro_cliente_payload(workflow_df.iloc[0], itens_df, client_df)
+        if cadastro_cliente.get("campos_pendentes"):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Preencha e salve o cadastro minimo antes de validar a fatura.",
+                    "fields": cadastro_cliente.get("campos_pendentes", []),
+                },
+            )
+
+        updated = _mark_fatura_validada(fatura_id, usuario)
         return {
             "id": updated["id"],
             "status_validacao": updated.get("status_validacao") or "validado",
             "validado_por": updated.get("validado_por"),
             "validado_em": updated.get("validado_em"),
             "updated_at": updated.get("updated_at"),
+            "status_calculo": updated.get("status_calculo"),
+            "calculado_em": updated.get("calculado_em"),
         }
     except HTTPException:
         raise
@@ -594,90 +1092,38 @@ def validar_fatura(
         raise HTTPException(status_code=500, detail=f"Erro ao validar fatura: {exc}")
 
 
+@router.post("/{fatura_id}/validar-e-calcular", response_model=FaturaValidacaoResponseSchema)
+def validar_e_calcular_fatura(
+    fatura_id: str,
+    payload: Optional[FaturaValidacaoRequestSchema] = None,
+):
+    usuario = (payload.usuario if payload else None) or "frontend"
+
+    try:
+        workflow_df, itens_df, medidores_df, _ = _load_fatura_context(fatura_id)
+        _build_client_df_for_calc(workflow_df.iloc[0], itens_df, medidores_df)
+        _mark_fatura_validada(fatura_id, usuario)
+        calculo = _calculate_fatura_impl(fatura_id, usuario_validacao=usuario)
+        updated = _get_workflow_df(fatura_id).iloc[0]
+        return {
+            "id": str(updated.get("id")),
+            "status_validacao": _safe_str(updated.get("status_validacao")) or "validado",
+            "validado_por": _safe_str(updated.get("validado_por")),
+            "validado_em": _safe_str(updated.get("validado_em")),
+            "updated_at": _safe_str(updated.get("updated_at")),
+            "status_calculo": calculo.get("status_calculo"),
+            "calculado_em": calculo.get("calculado_em"),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao validar e calcular fatura: {exc}")
+
+
 @router.post("/{fatura_id}/calcular", response_model=FaturaCalculoResponseSchema)
 def calcular_fatura(fatura_id: str):
     try:
-        workflow_df = _get_workflow_df(fatura_id)
-        workflow_row = workflow_df.iloc[0]
-
-        if _safe_str(workflow_row.get("status_parse")) == "erro_parse":
-            raise HTTPException(
-                status_code=400,
-                detail="Nao e possivel calcular uma fatura com erro de parse.",
-            )
-
-        itens_df = _get_itens_df(fatura_id)
-        medidores_df = _get_medidores_df(fatura_id)
-
-        if itens_df is None or itens_df.empty:
-            raise HTTPException(status_code=400, detail="A fatura nao possui itens parseados para calculo.")
-
-        if medidores_df is None or medidores_df.empty:
-            raise HTTPException(status_code=400, detail="A fatura nao possui medidores parseados para calculo.")
-
-        client_df, warnings = _build_client_df_for_calc(workflow_row)
-        calc_result = calculate_boletos(
-            itens_df,
-            medidores_df,
-            client_df,
-            only_registered_clients=False,
-            only_status_ativo=False,
-        )
-
-        boleto_df = calc_result.df_boletos.copy()
-        if boleto_df is None or boleto_df.empty:
-            detail = "Nao houve linhas elegiveis para calculo."
-            updated = _update_workflow_row(
-                fatura_id,
-                {
-                    "status_calculo": "erro_calculo",
-                    "calculado_em": _now_utc(),
-                    "observacoes": _append_observacao(workflow_row.get("observacoes"), detail),
-                },
-            )
-            return {
-                "id": updated["id"],
-                "status_calculo": updated.get("status_calculo") or "erro_calculo",
-                "calculado_em": updated.get("calculado_em"),
-                "table": TABLE_BOLETOS,
-                "affected_rows": 0,
-                "missing_clientes": calc_result.missing_clientes,
-                "missing_reason": {**calc_result.missing_reason, **warnings},
-                "detail": detail,
-            }
-
-        boleto_df = boleto_df[boleto_df["numero"].astype(str) == str(fatura_id)].copy()
-        if boleto_df.empty:
-            boleto_df = calc_result.df_boletos.head(1).copy()
-
-        existing_boleto_df = _get_boleto_df(fatura_id)
-        persist_df = _build_boleto_calc_row(workflow_row, itens_df, boleto_df, existing_boleto_df)
-        affected = upsert_dataframe(persist_df, TABLE_BOLETOS, key_column="id")
-
-        warning_msg = " | ".join(warnings.values()) if warnings else None
-        observacoes = workflow_row.get("observacoes")
-        if warning_msg:
-            observacoes = _append_observacao(observacoes, warning_msg)
-
-        updated = _update_workflow_row(
-            fatura_id,
-            {
-                "status_calculo": "calculado",
-                "calculado_em": _now_utc(),
-                "observacoes": observacoes,
-            },
-        )
-
-        return {
-            "id": updated["id"],
-            "status_calculo": updated.get("status_calculo") or "calculado",
-            "calculado_em": updated.get("calculado_em"),
-            "table": TABLE_BOLETOS,
-            "affected_rows": int(affected),
-            "missing_clientes": calc_result.missing_clientes,
-            "missing_reason": {**calc_result.missing_reason, **warnings},
-            "detail": "Calculo persistido sem emissao Sicoob.",
-        }
+        return _calculate_fatura_impl(fatura_id, usuario_validacao="calculo")
     except HTTPException:
         raise
     except Exception as exc:

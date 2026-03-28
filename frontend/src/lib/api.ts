@@ -3,6 +3,26 @@ import { env } from "./env";
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
+    try {
+      const parsed = JSON.parse(text);
+      const detail = parsed?.detail;
+
+      if (typeof detail === "string" && detail.trim()) {
+        throw new Error(detail);
+      }
+
+      if (detail && typeof detail === "object") {
+        const message = typeof detail.message === "string" ? detail.message : null;
+        const fields = Array.isArray(detail.fields) ? detail.fields.filter(Boolean).join(", ") : "";
+        const suffix = fields ? ` Campos: ${fields}.` : "";
+        throw new Error(`${message ?? "Erro na requisicao."}${suffix}`);
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+    }
+
     throw new Error(text || "Erro na requisicao");
   }
 

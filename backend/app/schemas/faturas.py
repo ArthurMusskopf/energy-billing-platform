@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FaturaParseResumoSchema(BaseModel):
@@ -30,6 +30,14 @@ class FaturaWorkflowItemSchema(BaseModel):
     classe_modalidade: Optional[str] = None
     grupo_subgrupo_tensao: Optional[str] = None
     total_pagar: Optional[float] = None
+    leitura_anterior: Optional[str] = None
+    leitura_atual: Optional[str] = None
+    dias: Optional[int] = None
+    proxima_leitura: Optional[str] = None
+    nota_fiscal_serie: Optional[str] = None
+    nota_fiscal_emissao: Optional[str] = None
+    cidade_uf: Optional[str] = None
+    cep: Optional[str] = None
     arquivo_nome_original: Optional[str] = None
     arquivo_hash: Optional[str] = None
     pdf_uri: Optional[str] = None
@@ -83,22 +91,66 @@ class FaturaMedidorDetalheSchema(BaseModel):
     total_apurado: Optional[float] = None
 
 
-class FaturaDetalheSchema(FaturaWorkflowItemSchema):
-    leitura_anterior: Optional[str] = None
-    leitura_atual: Optional[str] = None
-    dias: Optional[int] = None
-    proxima_leitura: Optional[str] = None
-    nota_fiscal_serie: Optional[str] = None
-    nota_fiscal_emissao: Optional[str] = None
-    cidade_uf: Optional[str] = None
+class FaturaCadastroClienteSchema(BaseModel):
+    unidade_consumidora: Optional[str] = None
+    cliente_numero: Optional[str] = None
+    nome: Optional[str] = None
+    cnpj_cpf: Optional[str] = None
     cep: Optional[str] = None
+    cidade_uf: Optional[str] = None
+    desconto_contratado: Optional[float] = None
+    subvencao: Optional[float] = None
+    status: Optional[str] = None
+    n_fases: Optional[int] = None
+    custo_disp: Optional[float] = None
+    origem: Optional[str] = None
+    campos_pendentes: List[str] = Field(default_factory=list)
+    cadastro_minimo_completo: bool = False
+    elegivel_para_calculo: bool = False
+
+
+class FaturaDetalheSchema(FaturaWorkflowItemSchema):
     itens: List[FaturaItemDetalheSchema]
     medidores: List[FaturaMedidorDetalheSchema]
     alertas: List[FaturaAlertaSchema]
+    cadastro_cliente: FaturaCadastroClienteSchema
+    campos_pendentes_cadastro: List[str] = Field(default_factory=list)
+    pode_validar_calcular: bool = False
 
 
 class FaturaValidacaoRequestSchema(BaseModel):
     usuario: Optional[str] = None
+
+
+class FaturaRevisaoCadastroRequestSchema(BaseModel):
+    unidade_consumidora: Optional[str] = None
+    cliente_numero: Optional[str] = None
+    nome: Optional[str] = None
+    cnpj_cpf: Optional[str] = None
+    cep: Optional[str] = None
+    cidade_uf: Optional[str] = None
+    desconto_contratado: Optional[float] = None
+    subvencao: Optional[float] = None
+    status: Optional[str] = None
+    n_fases: Optional[int] = None
+    custo_disp: Optional[float] = None
+
+
+class FaturaRevisaoRequestSchema(BaseModel):
+    usuario: Optional[str] = None
+    unidade_consumidora: Optional[str] = None
+    cliente_numero: Optional[str] = None
+    nome: Optional[str] = None
+    cnpj_cpf: Optional[str] = None
+    referencia: Optional[str] = None
+    vencimento: Optional[str] = None
+    leitura_anterior: Optional[str] = None
+    leitura_atual: Optional[str] = None
+    dias: Optional[int] = None
+    proxima_leitura: Optional[str] = None
+    cep: Optional[str] = None
+    cidade_uf: Optional[str] = None
+    cadastro_cliente: Optional[FaturaRevisaoCadastroRequestSchema] = None
 
 
 class FaturaValidacaoResponseSchema(BaseModel):
@@ -107,6 +159,8 @@ class FaturaValidacaoResponseSchema(BaseModel):
     validado_por: Optional[str] = None
     validado_em: Optional[str] = None
     updated_at: Optional[str] = None
+    status_calculo: Optional[str] = None
+    calculado_em: Optional[str] = None
 
 
 class FaturaCalculoResponseSchema(BaseModel):

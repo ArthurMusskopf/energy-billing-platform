@@ -13,6 +13,34 @@ export interface FaturaItem {
   tarifa_sem_trib: number;
 }
 
+export interface FaturaMedidor {
+  id: string;
+  medidor: string;
+  tipo: string;
+  posto: string;
+  leitura_anterior: string;
+  leitura_atual: string;
+  total_apurado: number;
+}
+
+export interface FaturaCadastroMinimo {
+  unidade_consumidora: string;
+  cliente_numero: string;
+  nome: string;
+  cnpj: string;
+  cep: string;
+  cidade_uf: string;
+  desconto_contratado: number | null;
+  subvencao: number | null;
+  status: string;
+  n_fases: number | null;
+  custo_disp: number | null;
+  campos_pendentes: string[];
+  cadastro_minimo_completo: boolean;
+  elegivel_para_calculo: boolean;
+  origem?: string;
+}
+
 export interface Fatura {
   id: string;
   unidade_consumidora: string;
@@ -32,6 +60,11 @@ export interface Fatura {
   cidade_uf: string;
   cep: string;
   itens: FaturaItem[];
+  medidores?: FaturaMedidor[];
+  cadastro?: FaturaCadastroMinimo;
+  campos_pendentes_cadastro?: string[];
+  pode_validar_calcular?: boolean;
+  status_calculo?: string;
   status: 'pendente' | 'validado' | 'erro';
   alertas: Alerta[];
 }

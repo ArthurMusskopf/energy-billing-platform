@@ -1,11 +1,17 @@
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { UploadZone } from "@/components/faturas/UploadZone";
 import { FaturaTable } from "@/components/faturas/FaturaTable";
 import { ProcessingSummary } from "@/components/faturas/ProcessingSummary";
-import { Fatura, FaturaItem, Alerta } from "@/types";
+import {
+  Alerta,
+  Fatura,
+  FaturaCadastroMinimo,
+  FaturaItem,
+  FaturaMedidor,
+} from "@/types";
 import { useToast } from "@/hooks/use-toast";
-import { getJson, patchJson, postFormData } from "@/lib/api";
+import { getJson, patchJson, postFormData, postJson } from "@/lib/api";
 
 interface ApiFaturaWorkflowItem {
   id: string;
@@ -19,6 +25,14 @@ interface ApiFaturaWorkflowItem {
   classe_modalidade?: string | null;
   grupo_subgrupo_tensao?: string | null;
   total_pagar?: number | null;
+  leitura_anterior?: string | null;
+  leitura_atual?: string | null;
+  dias?: number | null;
+  proxima_leitura?: string | null;
+  nota_fiscal_serie?: string | null;
+  nota_fiscal_emissao?: string | null;
+  cidade_uf?: string | null;
+  cep?: string | null;
   arquivo_nome_original?: string | null;
   arquivo_hash?: string | null;
   pdf_uri?: string | null;
@@ -50,6 +64,16 @@ interface ApiFaturaItem {
   tarifa_sem_trib?: number | null;
 }
 
+interface ApiFaturaMedidor {
+  id: string;
+  medidor?: string | null;
+  tipo?: string | null;
+  posto?: string | null;
+  leitura_anterior?: string | null;
+  leitura_atual?: string | null;
+  total_apurado?: number | null;
+}
+
 interface ApiFaturaAlert {
   id: string;
   campo: string;
@@ -60,17 +84,31 @@ interface ApiFaturaAlert {
   desvio_percentual?: number | null;
 }
 
-interface ApiFaturaDetailResponse extends ApiFaturaWorkflowItem {
-  leitura_anterior?: string | null;
-  leitura_atual?: string | null;
-  dias?: number | null;
-  proxima_leitura?: string | null;
-  nota_fiscal_serie?: string | null;
-  nota_fiscal_emissao?: string | null;
-  cidade_uf?: string | null;
+interface ApiFaturaCadastro {
+  unidade_consumidora?: string | null;
+  cliente_numero?: string | null;
+  nome?: string | null;
+  cnpj_cpf?: string | null;
   cep?: string | null;
+  cidade_uf?: string | null;
+  desconto_contratado?: number | null;
+  subvencao?: number | null;
+  status?: string | null;
+  n_fases?: number | null;
+  custo_disp?: number | null;
+  origem?: string | null;
+  campos_pendentes?: string[] | null;
+  cadastro_minimo_completo?: boolean | null;
+  elegivel_para_calculo?: boolean | null;
+}
+
+interface ApiFaturaDetailResponse extends ApiFaturaWorkflowItem {
   itens: ApiFaturaItem[];
+  medidores: ApiFaturaMedidor[];
   alertas: ApiFaturaAlert[];
+  cadastro_cliente: ApiFaturaCadastro;
+  campos_pendentes_cadastro?: string[] | null;
+  pode_validar_calcular?: boolean | null;
 }
 
 interface ApiListFaturasResponse {
@@ -100,12 +138,22 @@ interface ApiParseFaturasResponse {
   } | null;
 }
 
+interface ApiValidacaoCalculoResponse {
+  id: string;
+  status_validacao: string;
+  validado_por?: string | null;
+  validado_em?: string | null;
+  updated_at?: string | null;
+  status_calculo?: string | null;
+  calculado_em?: string | null;
+}
+
 function mapApiStatusToUiStatus(item: ApiFaturaWorkflowItem): Fatura["status"] {
   if (item.status_parse === "erro_parse") {
     return "erro";
   }
 
-  if (item.status_validacao === "validado") {
+  if (item.status_calculo === "calculado" || item.status_validacao === "validado") {
     return "validado";
   }
 
@@ -160,6 +208,73 @@ function mapApiItemToUi(item: ApiFaturaItem): FaturaItem {
   };
 }
 
+function mapApiMedidorToUi(item: ApiFaturaMedidor): FaturaMedidor {
+  return {
+    id: item.id,
+    medidor: item.medidor ?? "",
+    tipo: item.tipo ?? "",
+    posto: item.posto ?? "",
+    leitura_anterior: item.leitura_anterior ?? "",
+    leitura_atual: item.leitura_atual ?? "",
+    total_apurado: Number(item.total_apurado ?? 0),
+  };
+}
+
+function buildFallbackCadastro(item: Partial<ApiFaturaWorkflowItem>): FaturaCadastroMinimo {
+  return {
+    unidade_consumidora: item.unidade_consumidora ?? "",
+    cliente_numero: item.cliente_numero ?? "",
+    nome: item.nome ?? "",
+    cnpj: item.cnpj_cpf ?? "",
+    cep: item.cep ?? "",
+    cidade_uf: item.cidade_uf ?? "",
+    desconto_contratado: null,
+    subvencao: null,
+    status: "",
+    n_fases: null,
+    custo_disp: null,
+    campos_pendentes: [],
+    cadastro_minimo_completo: false,
+    elegivel_para_calculo: false,
+  };
+}
+
+function mapApiCadastroToUi(
+  cadastro: ApiFaturaCadastro | null | undefined,
+  base: Partial<ApiFaturaWorkflowItem>
+): FaturaCadastroMinimo {
+  const fallback = buildFallbackCadastro(base);
+
+  if (!cadastro) {
+    return fallback;
+  }
+
+  return {
+    unidade_consumidora: cadastro.unidade_consumidora ?? fallback.unidade_consumidora,
+    cliente_numero: cadastro.cliente_numero ?? fallback.cliente_numero,
+    nome: cadastro.nome ?? fallback.nome,
+    cnpj: cadastro.cnpj_cpf ?? fallback.cnpj,
+    cep: cadastro.cep ?? fallback.cep,
+    cidade_uf: cadastro.cidade_uf ?? fallback.cidade_uf,
+    desconto_contratado:
+      cadastro.desconto_contratado === null || cadastro.desconto_contratado === undefined
+        ? null
+        : Number(cadastro.desconto_contratado),
+    subvencao:
+      cadastro.subvencao === null || cadastro.subvencao === undefined
+        ? null
+        : Number(cadastro.subvencao),
+    status: cadastro.status ?? fallback.status,
+    n_fases: cadastro.n_fases === null || cadastro.n_fases === undefined ? null : Number(cadastro.n_fases),
+    custo_disp:
+      cadastro.custo_disp === null || cadastro.custo_disp === undefined ? null : Number(cadastro.custo_disp),
+    origem: cadastro.origem ?? fallback.origem,
+    campos_pendentes: cadastro.campos_pendentes ?? [],
+    cadastro_minimo_completo: Boolean(cadastro.cadastro_minimo_completo),
+    elegivel_para_calculo: Boolean(cadastro.elegivel_para_calculo),
+  };
+}
+
 function mapApiFaturaToUi(item: ApiFaturaWorkflowItem): Fatura {
   return {
     id: item.id,
@@ -170,22 +285,29 @@ function mapApiFaturaToUi(item: ApiFaturaWorkflowItem): Fatura {
     referencia: item.referencia ?? "",
     vencimento: item.vencimento ?? "",
     total: Number(item.total_pagar ?? 0),
-    leitura_anterior: "",
-    leitura_atual: "",
-    dias: 0,
-    proxima_leitura: "",
+    leitura_anterior: item.leitura_anterior ?? "",
+    leitura_atual: item.leitura_atual ?? "",
+    dias: Number(item.dias ?? 0),
+    proxima_leitura: item.proxima_leitura ?? "",
     nota_fiscal_numero: item.nota_fiscal ?? item.id,
-    nota_fiscal_serie: "",
-    nota_fiscal_emissao: "",
-    cidade_uf: "",
-    cep: "",
+    nota_fiscal_serie: item.nota_fiscal_serie ?? "",
+    nota_fiscal_emissao: item.nota_fiscal_emissao ?? "",
+    cidade_uf: item.cidade_uf ?? "",
+    cep: item.cep ?? "",
     itens: [],
+    medidores: [],
+    cadastro: buildFallbackCadastro(item),
+    campos_pendentes_cadastro: [],
+    pode_validar_calcular: false,
+    status_calculo: item.status_calculo ?? "",
     status: mapApiStatusToUiStatus(item),
     alertas: mapObservacaoToUiAlert(item),
   };
 }
 
 function mergeApiDetailIntoUi(current: Fatura, detail: ApiFaturaDetailResponse): Fatura {
+  const cadastro = mapApiCadastroToUi(detail.cadastro_cliente, detail);
+
   return {
     ...current,
     unidade_consumidora: detail.unidade_consumidora ?? current.unidade_consumidora,
@@ -205,6 +327,11 @@ function mergeApiDetailIntoUi(current: Fatura, detail: ApiFaturaDetailResponse):
     cidade_uf: detail.cidade_uf ?? current.cidade_uf,
     cep: detail.cep ?? current.cep,
     itens: (detail.itens ?? []).map(mapApiItemToUi),
+    medidores: (detail.medidores ?? []).map(mapApiMedidorToUi),
+    cadastro,
+    campos_pendentes_cadastro: detail.campos_pendentes_cadastro ?? cadastro.campos_pendentes,
+    pode_validar_calcular: Boolean(detail.pode_validar_calcular),
+    status_calculo: detail.status_calculo ?? current.status_calculo,
     status: mapApiStatusToUiStatus(detail),
     alertas:
       detail.alertas && detail.alertas.length > 0
@@ -213,11 +340,68 @@ function mergeApiDetailIntoUi(current: Fatura, detail: ApiFaturaDetailResponse):
   };
 }
 
+function buildReviewPayload(fatura: Fatura) {
+  return {
+    unidade_consumidora: fatura.unidade_consumidora || undefined,
+    cliente_numero: fatura.cliente_numero || undefined,
+    nome: fatura.nome || undefined,
+    cnpj_cpf: fatura.cnpj || undefined,
+    referencia: fatura.referencia || undefined,
+    vencimento: fatura.vencimento || undefined,
+    leitura_anterior: fatura.leitura_anterior || undefined,
+    leitura_atual: fatura.leitura_atual || undefined,
+    dias: Number.isFinite(fatura.dias) ? fatura.dias : undefined,
+    proxima_leitura: fatura.proxima_leitura || undefined,
+    cep: fatura.cep || undefined,
+    cidade_uf: fatura.cidade_uf || undefined,
+    cadastro_cliente: fatura.cadastro
+      ? {
+          unidade_consumidora: fatura.cadastro.unidade_consumidora || undefined,
+          cliente_numero: fatura.cadastro.cliente_numero || undefined,
+          nome: fatura.cadastro.nome || undefined,
+          cnpj_cpf: fatura.cadastro.cnpj || undefined,
+          cep: fatura.cadastro.cep || undefined,
+          cidade_uf: fatura.cadastro.cidade_uf || undefined,
+          desconto_contratado:
+            fatura.cadastro.desconto_contratado === null ? undefined : fatura.cadastro.desconto_contratado,
+          subvencao: fatura.cadastro.subvencao === null ? undefined : fatura.cadastro.subvencao,
+          status: fatura.cadastro.status || undefined,
+          n_fases: fatura.cadastro.n_fases === null ? undefined : fatura.cadastro.n_fases,
+          custo_disp: fatura.cadastro.custo_disp === null ? undefined : fatura.cadastro.custo_disp,
+        }
+      : undefined,
+  };
+}
+
+function mergePersistedDetails(previous: Fatura, current: Fatura): Fatura {
+  return {
+    ...current,
+    leitura_anterior: previous.leitura_anterior || current.leitura_anterior,
+    leitura_atual: previous.leitura_atual || current.leitura_atual,
+    dias: previous.dias || current.dias,
+    proxima_leitura: previous.proxima_leitura || current.proxima_leitura,
+    nota_fiscal_serie: previous.nota_fiscal_serie || current.nota_fiscal_serie,
+    nota_fiscal_emissao: previous.nota_fiscal_emissao || current.nota_fiscal_emissao,
+    cidade_uf: previous.cidade_uf || current.cidade_uf,
+    cep: previous.cep || current.cep,
+    itens: previous.itens.length > 0 ? previous.itens : current.itens,
+    medidores: previous.medidores && previous.medidores.length > 0 ? previous.medidores : current.medidores,
+    cadastro: previous.cadastro ?? current.cadastro,
+    campos_pendentes_cadastro:
+      previous.campos_pendentes_cadastro && previous.campos_pendentes_cadastro.length > 0
+        ? previous.campos_pendentes_cadastro
+        : current.campos_pendentes_cadastro,
+    pode_validar_calcular: previous.pode_validar_calcular ?? current.pode_validar_calcular,
+    alertas: previous.alertas.length > 0 ? previous.alertas : current.alertas,
+  };
+}
+
 export default function FaturasPage() {
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>({});
   const [loadedDetails, setLoadedDetails] = useState<Record<string, boolean>>({});
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
   const [validatingIds, setValidatingIds] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
@@ -226,28 +410,16 @@ export default function FaturasPage() {
       const response = await getJson<ApiListFaturasResponse>("/faturas");
       const mapped = (response.items ?? []).map(mapApiFaturaToUi);
 
-      setFaturas((prev) => {
-        const prevById = new Map(prev.map((item) => [item.id, item]));
+      setFaturas((previousFaturas) => {
+        const previousById = new Map(previousFaturas.map((item) => [item.id, item]));
 
         return mapped.map((item) => {
-          const previous = prevById.get(item.id);
+          const previous = previousById.get(item.id);
           if (!previous || !loadedDetails[item.id]) {
             return item;
           }
 
-          return {
-            ...item,
-            leitura_anterior: previous.leitura_anterior,
-            leitura_atual: previous.leitura_atual,
-            dias: previous.dias,
-            proxima_leitura: previous.proxima_leitura,
-            nota_fiscal_serie: previous.nota_fiscal_serie,
-            nota_fiscal_emissao: previous.nota_fiscal_emissao,
-            cidade_uf: previous.cidade_uf,
-            cep: previous.cep,
-            itens: previous.itens,
-            alertas: previous.alertas.length > 0 ? previous.alertas : item.alertas,
-          };
+          return mergePersistedDetails(previous, item);
         });
       });
     } catch (error) {
@@ -265,19 +437,19 @@ export default function FaturasPage() {
   }, [loadFaturas]);
 
   const loadFaturaDetail = useCallback(
-    async (faturaId: string) => {
-      if (loadedDetails[faturaId] || loadingDetails[faturaId]) {
+    async (faturaId: string, force = false) => {
+      if (!force && (loadedDetails[faturaId] || loadingDetails[faturaId])) {
         return;
       }
 
-      setLoadingDetails((prev) => ({ ...prev, [faturaId]: true }));
+      setLoadingDetails((previous) => ({ ...previous, [faturaId]: true }));
 
       try {
         const response = await getJson<ApiFaturaDetailResponse>(`/faturas/${faturaId}`);
-        setFaturas((prev) =>
-          prev.map((item) => (item.id === faturaId ? mergeApiDetailIntoUi(item, response) : item))
+        setFaturas((previous) =>
+          previous.map((item) => (item.id === faturaId ? mergeApiDetailIntoUi(item, response) : item))
         );
-        setLoadedDetails((prev) => ({ ...prev, [faturaId]: true }));
+        setLoadedDetails((previous) => ({ ...previous, [faturaId]: true }));
       } catch (error) {
         console.error(error);
         toast({
@@ -286,7 +458,7 @@ export default function FaturasPage() {
           variant: "destructive",
         });
       } finally {
-        setLoadingDetails((prev) => ({ ...prev, [faturaId]: false }));
+        setLoadingDetails((previous) => ({ ...previous, [faturaId]: false }));
       }
     },
     [loadedDetails, loadingDetails, toast]
@@ -332,47 +504,90 @@ export default function FaturasPage() {
     [loadFaturas, toast]
   );
 
-  const handleValidateFatura = useCallback(
-    async (faturaId: string) => {
-      setValidatingIds((prev) => ({ ...prev, [faturaId]: true }));
+  const handleSaveReview = useCallback(
+    async (fatura: Fatura) => {
+      setSavingIds((previous) => ({ ...previous, [fatura.id]: true }));
 
       try {
-        await patchJson(`/faturas/${faturaId}/validar`, {
-          usuario: "frontend",
-        });
+        const response = await patchJson<ApiFaturaDetailResponse>(
+          `/faturas/${fatura.id}/revisao`,
+          buildReviewPayload(fatura)
+        );
 
-        await loadFaturas();
+        setFaturas((previous) =>
+          previous.map((item) => (item.id === fatura.id ? mergeApiDetailIntoUi(item, response) : item))
+        );
+        setLoadedDetails((previous) => ({ ...previous, [fatura.id]: true }));
 
         toast({
-          title: "Fatura validada",
-          description: `A fatura ${faturaId} foi validada no backend.`,
+          title: "Revisao salva",
+          description: `As correcoes da fatura ${fatura.id} foram persistidas.`,
         });
       } catch (error) {
         console.error(error);
         toast({
-          title: "Erro na validacao",
-          description: `Nao foi possivel validar a fatura ${faturaId}.`,
+          title: "Erro ao salvar revisao",
+          description:
+            error instanceof Error ? error.message : `Nao foi possivel salvar a fatura ${fatura.id}.`,
           variant: "destructive",
         });
       } finally {
-        setValidatingIds((prev) => ({ ...prev, [faturaId]: false }));
+        setSavingIds((previous) => ({ ...previous, [fatura.id]: false }));
       }
     },
-    [loadFaturas, toast]
+    [toast]
   );
 
-  const handleUpdateFatura = useCallback((faturaId: string, field: string, value: any) => {
-    setFaturas((prev) => prev.map((f) => (f.id === faturaId ? { ...f, [field]: value } : f)));
-  }, []);
+  const handleValidateAndCalculate = useCallback(
+    async (fatura: Fatura) => {
+      setValidatingIds((previous) => ({ ...previous, [fatura.id]: true }));
+
+      try {
+        const reviewResponse = await patchJson<ApiFaturaDetailResponse>(
+          `/faturas/${fatura.id}/revisao`,
+          buildReviewPayload(fatura)
+        );
+
+        setFaturas((previous) =>
+          previous.map((item) => (item.id === fatura.id ? mergeApiDetailIntoUi(item, reviewResponse) : item))
+        );
+
+        await postJson<ApiValidacaoCalculoResponse>(`/faturas/${fatura.id}/validar-e-calcular`, {
+          usuario: "frontend",
+        });
+
+        await loadFaturaDetail(fatura.id, true);
+        await loadFaturas();
+
+        toast({
+          title: "Fatura validada e calculada",
+          description: `A fatura ${fatura.id} foi revisada, validada e enviada para calculo sem emissao bancaria.`,
+        });
+      } catch (error) {
+        console.error(error);
+        toast({
+          title: "Erro no fluxo de validacao",
+          description:
+            error instanceof Error
+              ? error.message
+              : `Nao foi possivel validar e calcular a fatura ${fatura.id}.`,
+          variant: "destructive",
+        });
+      } finally {
+        setValidatingIds((previous) => ({ ...previous, [fatura.id]: false }));
+      }
+    },
+    [loadFaturaDetail, loadFaturas, toast]
+  );
 
   const totalFaturas = faturas.length;
-  const faturasValidadas = faturas.filter((f) => f.status === "validado").length;
-  const faturasComAlerta = faturas.filter((f) => f.alertas.length > 0).length;
+  const faturasValidadas = faturas.filter((fatura) => fatura.status === "validado").length;
+  const faturasComAlerta = faturas.filter((fatura) => fatura.alertas.length > 0).length;
 
   return (
     <MainLayout
       title="Upload de Faturas"
-      subtitle="Carregue faturas em PDF para parseamento automático"
+      subtitle="Carregue faturas em PDF para parseamento automatico"
     >
       <div className="space-y-6 animate-fade-in">
         <UploadZone onFilesUploaded={handleFilesUploaded} isProcessing={isProcessing} />
@@ -386,10 +601,11 @@ export default function FaturasPage() {
 
         <FaturaTable
           faturas={faturas}
-          onValidate={handleValidateFatura}
-          onUpdate={handleUpdateFatura}
+          onSaveReview={handleSaveReview}
+          onValidateAndCalculate={handleValidateAndCalculate}
           onRequestDetails={loadFaturaDetail}
           loadingDetails={loadingDetails}
+          savingIds={savingIds}
           validatingIds={validatingIds}
         />
       </div>
