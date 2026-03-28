@@ -149,6 +149,24 @@ def _normalize_status(value: Any) -> Optional[str]:
     return status
 
 
+def _normalize_status_validacao(value: Any) -> Optional[str]:
+    status = _safe_str(value)
+    if not status:
+        return None
+    if status.lower() in {"validado", "validada"}:
+        return "validada"
+    return status
+
+
+def _normalize_status_calculo(value: Any) -> Optional[str]:
+    status = _safe_str(value)
+    if not status:
+        return None
+    if status.lower() in {"calculado", "calculada"}:
+        return "calculada"
+    return status
+
+
 def _coalesce_value(*values: Any) -> Any:
     for value in values:
         if value is None:
@@ -183,6 +201,13 @@ def _safe_records(df: pd.DataFrame) -> List[dict]:
 
     out = out.where(pd.notna(out), None)
     return out.to_dict(orient="records")
+
+
+def _normalize_workflow_statuses(record: dict) -> dict:
+    normalized = dict(record)
+    normalized["status_validacao"] = _normalize_status_validacao(record.get("status_validacao"))
+    normalized["status_calculo"] = _normalize_status_calculo(record.get("status_calculo"))
+    return normalized
 
 
 def _optional_query(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
@@ -442,7 +467,7 @@ def _build_fatura_detail_payload(
     fatura_id = str(workflow.get("id"))
     cadastro_cliente = _build_cadastro_cliente_payload(workflow_row, itens_df, client_df)
 
-    detalhe = dict(workflow)
+    detalhe = _normalize_workflow_statuses(workflow)
     detalhe.update(
         {
             "leitura_anterior": _safe_str(
@@ -547,12 +572,11 @@ def _persist_cliente_from_review(
 ) -> None:
     nested = review_payload.cadastro_cliente
     merged_payload = {
-        "unidade_consumidora": nested.unidade_consumidora if nested and nested.unidade_consumidora is not None else review_payload.unidade_consumidora,
-        "cliente_numero": nested.cliente_numero if nested and nested.cliente_numero is not None else review_payload.cliente_numero,
-        "nome": nested.nome if nested and nested.nome is not None else review_payload.nome,
-        "cnpj_cpf": nested.cnpj_cpf if nested and nested.cnpj_cpf is not None else review_payload.cnpj_cpf,
-        "cep": nested.cep if nested and nested.cep is not None else review_payload.cep,
-        "cidade_uf": nested.cidade_uf if nested and nested.cidade_uf is not None else review_payload.cidade_uf,
+        "unidade_consumidora": (
+            nested.unidade_consumidora
+            if nested and nested.unidade_consumidora is not None
+            else review_payload.unidade_consumidora
+        ),
         "desconto_contratado": nested.desconto_contratado if nested else None,
         "subvencao": nested.subvencao if nested else None,
         "status": nested.status if nested else None,
@@ -563,7 +587,6 @@ def _persist_cliente_from_review(
     client_df = _get_client_df(
         workflow_row,
         uc=_safe_str(merged_payload.get("unidade_consumidora")),
-        cliente_numero=_safe_str(merged_payload.get("cliente_numero")),
     )
     cadastro_cliente = _build_cadastro_cliente_payload(workflow_row, itens_df, client_df)
 
@@ -595,11 +618,6 @@ def _persist_cliente_from_review(
 
     client_payload = {
         "unidade_consumidora": unidade_consumidora,
-        "cliente_numero": _safe_str(cadastro_cliente.get("cliente_numero")),
-        "nome": _safe_str(cadastro_cliente.get("nome")),
-        "cnpj_cpf": _safe_str(cadastro_cliente.get("cnpj_cpf")),
-        "cep": _safe_str(cadastro_cliente.get("cep")),
-        "cidade_uf": _safe_str(cadastro_cliente.get("cidade_uf")),
         "desconto_contratado": _normalize_discount_fraction(cadastro_cliente.get("desconto_contratado")),
         "subvencao": _safe_float(cadastro_cliente.get("subvencao"), default=None),
         "status": _normalize_status(cadastro_cliente.get("status")),
@@ -803,21 +821,21 @@ def _calculate_fatura_impl(fatura_id: str, usuario_validacao: str) -> dict:
     updated = _update_workflow_row(
         fatura_id,
         {
-            "status_validacao": "validado",
+            "status_validacao": "validada",
             "validado_por": usuario_validacao,
             "validado_em": _now_utc(),
-            "status_calculo": "calculado",
+            "status_calculo": "calculada",
             "calculado_em": _now_utc(),
         },
     )
 
     return {
         "id": updated["id"],
-        "status_validacao": updated.get("status_validacao") or "validado",
+        "status_validacao": _normalize_status_validacao(updated.get("status_validacao")) or "validada",
         "validado_por": updated.get("validado_por"),
         "validado_em": updated.get("validado_em"),
         "updated_at": updated.get("updated_at"),
-        "status_calculo": updated.get("status_calculo") or "calculado",
+        "status_calculo": _normalize_status_calculo(updated.get("status_calculo")) or "calculada",
         "calculado_em": updated.get("calculado_em"),
         "table": TABLE_BOLETOS,
         "affected_rows": int(affected),
@@ -928,7 +946,8 @@ def list_faturas(
         if df_total is not None and not df_total.empty and "total" in df_total.columns:
             total = int(df_total.iloc[0]["total"])
 
-        return {"items": _safe_records(df_items), "total": total, "limit": limit, "offset": offset}
+        items = [_normalize_workflow_statuses(record) for record in _safe_records(df_items)]
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao listar faturas: {exc}")
 
@@ -1026,11 +1045,11 @@ def validar_e_calcular_fatura(
         calculo = _calculate_fatura_impl(fatura_id, usuario_validacao=usuario)
         return {
             "id": str(calculo.get("id")),
-            "status_validacao": str(calculo.get("status_validacao") or "validado"),
+            "status_validacao": _normalize_status_validacao(calculo.get("status_validacao")) or "validada",
             "validado_por": _safe_str(calculo.get("validado_por")),
             "validado_em": _safe_str(calculo.get("validado_em")),
             "updated_at": _safe_str(calculo.get("updated_at")),
-            "status_calculo": _safe_str(calculo.get("status_calculo")),
+            "status_calculo": _normalize_status_calculo(calculo.get("status_calculo")),
             "calculado_em": _safe_str(calculo.get("calculado_em")),
         }
     except HTTPException:

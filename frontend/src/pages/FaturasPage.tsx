@@ -151,12 +151,20 @@ interface ApiValidacaoCalculoResponse {
   calculado_em?: string | null;
 }
 
+function isValidatedWorkflowStatus(status?: string | null): boolean {
+  return status === "validada" || status === "validado";
+}
+
+function isCalculatedWorkflowStatus(status?: string | null): boolean {
+  return status === "calculada" || status === "calculado";
+}
+
 function mapApiStatusToUiStatus(item: ApiFaturaWorkflowItem): Fatura["status"] {
   if (item.status_parse === "erro_parse") {
     return "erro";
   }
 
-  if (item.status_calculo === "calculado" || item.status_validacao === "validado") {
+  if (isCalculatedWorkflowStatus(item.status_calculo) || isValidatedWorkflowStatus(item.status_validacao)) {
     return "validado";
   }
 

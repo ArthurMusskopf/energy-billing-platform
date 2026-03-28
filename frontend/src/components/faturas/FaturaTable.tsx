@@ -63,6 +63,10 @@ function isEligibleForCalculation(fatura: Fatura): boolean {
   return getDraftPendingFields(fatura).length === 0 && cadastro.status.trim().toLowerCase() === "ativo";
 }
 
+function isCalculatedStatus(status?: string): boolean {
+  return status === "calculada" || status === "calculado";
+}
+
 export function FaturaTable({
   faturas,
   onSaveReview,
@@ -166,7 +170,7 @@ export function FaturaTable({
     }).format(value);
 
   const getStatusBadge = (fatura: Fatura) => {
-    if (fatura.status_calculo === "calculado") {
+    if (isCalculatedStatus(fatura.status_calculo)) {
       return <Badge className="bg-success/10 text-success border-success/20">Calculada</Badge>;
     }
     if (fatura.status === "validado") {
@@ -240,14 +244,14 @@ export function FaturaTable({
                       <TableCell className="text-right">
                         <Button
                           size="sm"
-                          variant={fatura.status_calculo === "calculado" ? "secondary" : "default"}
-                          disabled={fatura.status_calculo === "calculado" || isValidating || !canValidateAndCalculate}
+                          variant={isCalculatedStatus(fatura.status_calculo) ? "secondary" : "default"}
+                          disabled={isCalculatedStatus(fatura.status_calculo) || isValidating || !canValidateAndCalculate}
                           onClick={(event) => {
                             event.stopPropagation();
                             onValidateAndCalculate(fatura);
                           }}
                         >
-                          {fatura.status_calculo === "calculado" ? (
+                          {isCalculatedStatus(fatura.status_calculo) ? (
                             <>
                               <Check className="mr-1 h-4 w-4" /> Calculada
                             </>

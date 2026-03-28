@@ -228,19 +228,25 @@ def _energia_injetada_tarifa(
                 return float(r["tarifa"])
         return 0.0
 
-    if gerador == 0 and (not pd.isna(med_inj_tusd)) and float(med_inj_tusd) != 0.0:
-        tar_max = float(sub["tarifa"].max())
-        tar_min = float(sub["tarifa"].min())
-        qty_max = float(sub["quantidade_registrada"].max())
-        qty_min = float(sub["quantidade_registrada"].min())
-
-        med = float(med_inj_tusd)
-        w_max = qty_max / med
-        w_min = qty_min / med
-        denom = w_max + w_min
-        if denom == 0:
+    def weighted_avg_qty():
+        weighted = sub.copy()
+        weighted["peso_quantidade"] = weighted["quantidade_registrada"].abs()
+        weighted = weighted[weighted["peso_quantidade"] > 0]
+        if weighted.empty:
             return 0.0
-        return (tar_max * w_max + tar_min * w_min) / denom
+
+        total_qty = float(weighted["peso_quantidade"].sum(min_count=1))
+        if _isclose(total_qty, 0.0):
+            return 0.0
+
+        numerador = float((weighted["tarifa"] * weighted["peso_quantidade"]).sum(min_count=1))
+        return numerador / total_qty
+
+    if gerador == 0 and (not pd.isna(med_inj_tusd)) and float(med_inj_tusd) != 0.0:
+        # Regra de negocio nova:
+        # para consumidor nao gerador com energia injetada positiva,
+        # a tarifa deve refletir a media ponderada das linhas efetivamente registradas.
+        return weighted_avg_qty()
 
     return xlookup_qty()
 

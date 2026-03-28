@@ -189,9 +189,19 @@ class FaturasFlowTests(unittest.TestCase):
         self.assertIn(faturas_api.TABLE_FATURA_ITENS, tables)
         self.assertIn(faturas_api.TABLE_MEDIDORES, tables)
         self.assertIn(faturas_api.TABLE_CLIENTES, tables)
+
+        clientes_calls = [call for call in mock_upsert.call_args_list if call.args[1] == faturas_api.TABLE_CLIENTES]
+        self.assertEqual(len(clientes_calls), 1)
+        clientes_payload = clientes_calls[0].args[0]
+        self.assertEqual(
+            set(clientes_payload.columns),
+            {"unidade_consumidora", "desconto_contratado", "subvencao", "status", "n_fases", "custo_disp", "updated_at"},
+        )
+
         self.assertEqual(response["leitura_atual"], "01/04/2026")
         self.assertEqual(response["cidade_uf"], "Blumenau/SC")
         self.assertEqual(response["cadastro_cliente"]["status"], "Ativo")
+        self.assertTrue(response["pode_validar_calcular"])
 
     def test_validar_e_calcular_blocks_incomplete_cadastro(self):
         workflow_df = pd.DataFrame(
@@ -219,6 +229,7 @@ class FaturasFlowTests(unittest.TestCase):
         self.assertEqual(exc.exception.status_code, 400)
         self.assertIn("unidade_consumidora", exc.exception.detail["fields"])
         self.assertIn("desconto_contratado", exc.exception.detail["fields"])
+        self.assertIn("status", exc.exception.detail["fields"])
 
     def test_validar_e_calcular_success_persists_boleto_and_updates_workflow(self):
         workflow_df = pd.DataFrame(
@@ -313,12 +324,13 @@ class FaturasFlowTests(unittest.TestCase):
         ) as mock_update:
             response = faturas_api.validar_e_calcular_fatura("123", FaturaValidacaoRequestSchema(usuario="frontend"))
 
-        self.assertEqual(response["status_calculo"], "calculado")
+        self.assertEqual(response["status_validacao"], "validada")
+        self.assertEqual(response["status_calculo"], "calculada")
         self.assertEqual(mock_upsert.call_args.args[1], faturas_api.TABLE_BOLETOS)
         update_payload = mock_update.call_args.args[1]
-        self.assertEqual(update_payload["status_validacao"], "validado")
+        self.assertEqual(update_payload["status_validacao"], "validada")
         self.assertEqual(update_payload["validado_por"], "frontend")
-        self.assertEqual(update_payload["status_calculo"], "calculado")
+        self.assertEqual(update_payload["status_calculo"], "calculada")
 
 
 if __name__ == "__main__":
