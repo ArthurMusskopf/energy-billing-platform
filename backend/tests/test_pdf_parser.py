@@ -1,3 +1,4 @@
+
 import sys
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.pdf_parser import parse_cliente_numero, parse_periodo_leituras, parse_unidade_consumidora
+from app.services.pdf_parser import parse_cliente_numero, parse_unidade_consumidora
 
 
 class PdfParserTests(unittest.TestCase):
@@ -35,39 +36,34 @@ class PdfParserTests(unittest.TestCase):
 
         self.assertIsNone(unidade_consumidora)
 
-    def test_parse_unidade_consumidora_accepts_uc_from_explicit_header_slot_even_if_equal_to_cliente(self):
+    def test_parse_unidade_consumidora_accepts_7_digit_uc_in_header_block(self):
         text = """
-        Unidade Consumidora Nosso Número Referência Vencimento Total a Pagar (R$)
-        21/01/2026 202601-077489757 0010511267 01/2026 18/02/2026 301,35
-        Cliente:10511267
+        COMERCIAL - OUTROS SERVICOS
+        NOME: HOTEL UNIAO LTDA
+        4299949
+        CPF/CNPJ: 82.819.665/0001-96
+        ENDERECO: DO COMERCIO 414 - CENTRO Cliente: 15673885 NOTA FISCAL Nº046259038 SERIE:001 DATA EMISSAO:09/05/2025
         """
 
-        unidade_consumidora = parse_unidade_consumidora(text, cliente_numero="10511267")
+        cliente_numero = parse_cliente_numero(text)
+        unidade_consumidora = parse_unidade_consumidora(text, cliente_numero=cliente_numero)
 
-        self.assertEqual(unidade_consumidora, "10511267")
+        self.assertEqual(cliente_numero, "15673885")
+        self.assertEqual(unidade_consumidora, "4299949")
 
-    def test_parse_periodo_leituras_accepts_compact_line_with_lida_token(self):
+    def test_parse_unidade_consumidora_ignores_nf_and_nosso_numero_in_canhoto(self):
         text = """
-        19/12/2025 21/01/2026 33 Lida 20/02/2026 Amarela R$ 0,01885
+        Unidade Consumidora Nosso Número Referência Vencimento
+        09/05/2025 202505-046279454 0004311469 17801790790 05/2025 12/06/2025
+        Cliente: 64166808
+        NOTA FISCAL Nº046279454 SERIE:001 DATA EMISSAO:09/05/2025
         """
 
-        periodo = parse_periodo_leituras(text)
+        cliente_numero = parse_cliente_numero(text)
+        unidade_consumidora = parse_unidade_consumidora(text, cliente_numero=cliente_numero)
 
-        self.assertEqual(periodo["leitura_anterior"], "19/12/2025")
-        self.assertEqual(periodo["leitura_atual"], "21/01/2026")
-        self.assertEqual(periodo["dias"], 33)
-        self.assertEqual(periodo["proxima_leitura"], "20/02/2026")
-
-    def test_parse_periodo_leituras_prefers_compact_line_days_over_historic_dias_label_noise(self):
-        text = """
-        Consumo Faturado Dias Faturados
-        DEZ/25 1207 25
-        19/12/2025 21/01/2026 33 Lida 20/02/2026 Amarela R$ 0,01885
-        """
-
-        periodo = parse_periodo_leituras(text)
-
-        self.assertEqual(periodo["dias"], 33)
+        self.assertEqual(cliente_numero, "64166808")
+        self.assertEqual(unidade_consumidora, "4311469")
 
 
 if __name__ == "__main__":

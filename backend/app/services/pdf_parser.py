@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +10,28 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import pdfplumber
+
+
+UC_MIN_LEN = 7
+UC_MAX_LEN = 12
+
+_BANNED_UC_CONTEXT_RE = re.compile(
+    "|".join(
+        [
+            r"\bcliente\b",
+            r"nota\s+fiscal",
+            r"nosso\s+n[úu]mero",
+            r"n[úu]mero\s+refer",
+            r"chave\s+de\s+acesso",
+            r"protocolo",
+            r"c[oó]digo\s+para\s+cadastro",
+            r"linha\s+digit[aá]vel",
+            r"\bbradesco\b",
+            r"pague\s+com\s+pix",
+        ]
+    ),
+    re.I,
+)
 
 
 @dataclass
@@ -95,66 +118,144 @@ def _normalize_fases_truncadas(s: str) -> str:
     return s
 
 
-def parse_cliente_numero(txt: str) -> Optional[str]:
-    return safe_search(r"\bCliente\s*:\s*([0-9]+)", txt, flags=re.I)
-
-
-def _normalize_numeric_id(value: Optional[str]) -> Optional[str]:
+def _normalize_numeric_code(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
-    cleaned = str(value).strip().lstrip("0")
-    return cleaned or "0"
+    digits = re.sub(r"\D+", "", str(value))
+    if not digits:
+        return None
+    return digits.lstrip("0") or digits
+
+
+def parse_cliente_numero(txt: str) -> Optional[str]:
+    patterns = [
+        r"\bCliente\s*:\s*0*([0-9]{6,12})\b",
+        r"\bC[oó]digo\s+do\s+Cliente\s*:\s*0*([0-9]{6,12})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, txt, flags=re.I)
+        if match:
+            return _normalize_numeric_code(match.group(1))
+    return None
+
+
+def parse_nf(txt: str) -> dict:
+    m = re.search(
+        r"NOTA\s+FISCAL\s+N[ºO]\s*([0-9]+)\s+SERIE:?\s*([0-9]+)\s+DATA\s+EMISS(?:A|Ã)O:\s*([0-9/]+)",
+        txt,
+        re.I,
+    )
+    return {"numero": m.group(1), "serie": m.group(2), "data_emissao": m.group(3)} if m else {}
+
+
+def _iter_numeric_candidates_from_line(line: str):
+    line = line or ""
+    if _BANNED_UC_CONTEXT_RE.search(line):
+        return []
+
+    pure_match = re.fullmatch(rf"\s*0*([0-9]{{{UC_MIN_LEN},{UC_MAX_LEN}}})\s*$", line)
+    if pure_match:
+        return [(_normalize_numeric_code(pure_match.group(1)), True, 0)]
+
+    out = []
+    for m in re.finditer(rf"(?<!\d)0*([0-9]{{{UC_MIN_LEN},{UC_MAX_LEN}}})(?![\d/])", line):
+        out.append((_normalize_numeric_code(m.group(1)), False, m.start(1)))
+    return out
+
+
+def _validate_unidade_consumidora(
+    unidade_consumidora: Optional[str],
+    *,
+    cliente_numero: Optional[str] = None,
+    nf_numero: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    uc = _normalize_numeric_code(unidade_consumidora)
+    if not uc:
+        return None, "UC nao encontrada"
+
+    if not (UC_MIN_LEN <= len(uc) <= UC_MAX_LEN):
+        return None, "UC suspeita: quantidade de digitos fora do padrao esperado"
+
+    cliente_norm = _normalize_numeric_code(cliente_numero)
+    nf_norm = _normalize_numeric_code(nf_numero)
+
+    if cliente_norm and uc == cliente_norm:
+        return None, "UC suspeita: coincide com o codigo do cliente"
+
+    if nf_norm and uc == nf_norm:
+        return None, "UC suspeita: coincide com o numero da nota fiscal"
+
+    return uc, None
 
 
 def parse_unidade_consumidora(txt: str, cliente_numero: Optional[str] = None) -> Optional[str]:
-    cliente_norm = _normalize_numeric_id(cliente_numero)
+    cliente_numero_norm = _normalize_numeric_code(cliente_numero)
+    nf_numero_norm = _normalize_numeric_code(parse_nf(txt).get("numero"))
+    blocked_codes = {code for code in (cliente_numero_norm, nf_numero_norm) if code}
 
-    def _candidate(value: str, *, allow_same_as_cliente: bool = False) -> Optional[str]:
-        uc = _normalize_numeric_id(value)
-        if not uc:
-            return None
-        if not allow_same_as_cliente and cliente_norm and uc == cliente_norm:
-            return None
-        return uc
+    lines = [clean_spaces(line) or "" for line in txt.splitlines()]
+    candidates: dict[str, tuple[tuple[int, int, int], str]] = {}
 
-    m = re.search(
-        r"Unidade\s+Consumidora\s+Nosso\s+N[uú]mero\s+Refer[êe]ncia\s+Vencimento.*?\n"
-        r"\s*[0-9]{2}/[0-9]{2}/[0-9]{4}\s+\S+\s+0*([0-9]{8,12})\s+[0-9]{2}/[0-9]{4}",
-        txt,
-        flags=re.I | re.S,
-    )
-    if m:
-        uc = _candidate(m.group(1), allow_same_as_cliente=True)
-        if uc:
-            return uc
+    def add_candidate(code: Optional[str], score: int, line_idx: int, token_pos: int, source: str) -> None:
+        if not code or code in blocked_codes:
+            return
 
-    m = re.search(r"Unidade\s+Consumidora\s*\n?\s*0*([0-9]{8,12})", txt, flags=re.I)
-    if m:
-        uc = _candidate(m.group(1), allow_same_as_cliente=True)
-        if uc:
-            return uc
+        rank = (-score, line_idx, token_pos)
+        current = candidates.get(code)
+        if current is None or rank < current[0]:
+            candidates[code] = (rank, source)
 
-    lines = txt.splitlines()
-    stop = min(len(lines), 40)
-    for i, l in enumerate(lines[:stop]):
-        if re.search(r"\bCliente\s*:", l, flags=re.I):
+    for pattern, score in [
+        (rf"Unidade\s+Consumidora\s*[:\-]?\s*\n?\s*0*([0-9]{{{UC_MIN_LEN},{UC_MAX_LEN}}})", 120),
+        (rf"\bUC\s*[:\-]?\s*0*([0-9]{{{UC_MIN_LEN},{UC_MAX_LEN}}})\b", 115),
+    ]:
+        for match in re.finditer(pattern, txt, flags=re.I):
+            add_candidate(
+                _normalize_numeric_code(match.group(1)),
+                score,
+                txt[: match.start()].count("\n"),
+                max(match.start(1) - match.start(), 0),
+                "label-regex",
+            )
+
+    for idx, line in enumerate(lines):
+        if not re.search(r"\b(Unidade\s+Consumidora|UC)\b", line, flags=re.I):
+            continue
+
+        for offset in range(0, 6):
+            if idx + offset >= len(lines):
+                break
+
+            target = lines[idx + offset]
+            for code, is_pure_numeric, token_pos in _iter_numeric_candidates_from_line(target):
+                base_score = 105 if is_pure_numeric else 65
+                if offset == 0 and is_pure_numeric:
+                    base_score = 118
+
+                add_candidate(code, base_score - offset, idx + offset, token_pos, f"label-vicinity:{offset}")
+
+    stop = min(len(lines), 60)
+    for i, line in enumerate(lines[:stop]):
+        if re.search(r"\bCliente\s*:", line, flags=re.I):
             stop = i
             break
 
-    for l in lines[:stop]:
-        lm = re.match(r"^\s*0*([0-9]{8,12})\s*$", l)
-        if lm:
-            uc = _candidate(lm.group(1))
-            if uc:
-                return uc
+    for idx, line in enumerate(lines[:stop]):
+        for code, is_pure_numeric, token_pos in _iter_numeric_candidates_from_line(line):
+            base_score = 90 if is_pure_numeric else 60
+            add_candidate(code, base_score - min(idx, 30), idx, token_pos, "top-block")
 
-    m = re.search(r"(?<!\d)0*([0-9]{8,12})(?![\d/])", txt)
-    if m:
-        uc = _candidate(m.group(1))
-        if uc:
-            return uc
+    item_start = next((i for i, line in enumerate(lines) if line.startswith("(")), min(len(lines), 120))
+    for idx, line in enumerate(lines[: min(item_start, 120)]):
+        match = re.fullmatch(rf"\s*0*([0-9]{{{UC_MIN_LEN},{UC_MAX_LEN}}})\s*$", line)
+        if match and not _BANNED_UC_CONTEXT_RE.search(line):
+            add_candidate(_normalize_numeric_code(match.group(1)), 50 - min(idx, 40), idx, 0, "early-numeric")
 
-    return None
+    if not candidates:
+        return None
+
+    ranked_codes = sorted(candidates.items(), key=lambda item: item[1][0])
+    return ranked_codes[0][0]
 
 
 def parse_periodo_leituras(txt: str) -> dict:
@@ -197,19 +298,14 @@ def parse_periodo_leituras(txt: str) -> dict:
         )
         return out
 
-    raw_pat = (
-        r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+"
-        r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+"
-        r"([0-9]{1,3})(?:\s+(?:Lida|Lido|Lidas|Lidos))?\s+"
-        r"([0-9]{2}/[0-9]{2}/[0-9]{4})"
-    )
+    raw_pat = r"([0-9]{2}/[0-9]{2}/[0-9]{4})\s+([0-9]{2}/[0-9]{2}/[0-9]{4})\s+([0-9]{1,3})(?:\s+(?:Lida|Lido|Lidas|Lidos))?\s+([0-9]{2}/[0-9]{2}/[0-9]{4})"
     m = re.search(raw_pat, txt, flags=re.I)
     if m:
         out.update(
             {
                 "leitura_anterior": la or m.group(1),
                 "leitura_atual": lt or m.group(2),
-                "dias": int(m.group(3)),
+                "dias": di if di is not None else int(m.group(3)),
                 "proxima_leitura": pl or m.group(4),
             }
         )
@@ -267,7 +363,7 @@ def parse_header(txt: str) -> dict:
     h["n_fases_parseado"] = infer_n_fases(h.get("classe_modalidade"))
 
     h["cliente_numero"] = parse_cliente_numero(txt)
-    h["unidade_consumidora"] = parse_unidade_consumidora(txt, cliente_numero=h["cliente_numero"])
+    h["unidade_consumidora"] = parse_unidade_consumidora(txt, cliente_numero=h.get("cliente_numero"))
 
     m = re.search(r"(\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})\s+R\$?\s*([0-9\.,]+)", txt)
     if m:
@@ -288,15 +384,6 @@ def parse_header(txt: str) -> dict:
     h["grupo_subgrupo_tensao"] = safe_search(r"Grupo/Subgrupo\s*Tens[aã]o:\s*([^\n]+)", txt, flags=re.I)
 
     return h
-
-
-def parse_nf(txt: str) -> dict:
-    m = re.search(
-        r"NOTA\s+FISCAL\s+N[ºO]\s*([0-9]+)\s+SERIE:?\s*([0-9]+)\s+DATA\s+EMISS(?:A|Ã)O:\s*([0-9/]+)",
-        txt,
-        re.I,
-    )
-    return {"numero": m.group(1), "serie": m.group(2), "data_emissao": m.group(3)} if m else {}
 
 
 def parse_itens(txt: str) -> list:
@@ -433,8 +520,15 @@ def parse_fatura(pdf_path: str) -> ResultadoParsing:
     itens = parse_itens(txt)
     medidores = parse_medidores(txt)
 
-    if not header.get("unidade_consumidora"):
-        erros.append("UC nao encontrada")
+    unidade_consumidora_validada, uc_erro = _validate_unidade_consumidora(
+        header.get("unidade_consumidora"),
+        cliente_numero=header.get("cliente_numero"),
+        nf_numero=nf.get("numero"),
+    )
+    header["unidade_consumidora"] = unidade_consumidora_validada
+    if uc_erro:
+        erros.append(uc_erro)
+
     if not itens:
         alertas.append("Sem itens tarifarios")
 
